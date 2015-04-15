@@ -118,6 +118,8 @@ cpp_src+=matlab/src/bits/impl/subsample_cpu.cpp
 cpp_src+=matlab/src/bits/impl/copy_cpu.cpp
 cpp_src+=matlab/src/bits/impl/pooling_cpu.cpp
 cpp_src+=matlab/src/bits/impl/normalize_cpu.cpp
+cpp_src+=matlab/src/bits/selectivesearch.cpp
+mex_src+=matlab/src/vl_selectivesearch.cpp
 
 # GPU-specific files
 ifneq ($(ENABLE_GPU),)
