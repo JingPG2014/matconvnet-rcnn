@@ -30,12 +30,12 @@ void mexFunction(int nout, mxArray *out[],
     mexErrMsgTxt("Input must be HxWx3");
   }
 
-  const mwSize * dims = mxGetDimensions(in[0]);
+  mwSize const *dims = mxGetDimensions(in[0]);
   mwSize height = dims[0];
   mwSize width = dims[1];
   mwSize nchannels = dims[2];
 
-  float * data = (float *) mxGetData(in[0]);
+  float const *data = (float *) mxGetData(in[0]);
 
   std::vector<int> buf(height*width);
   vl::selectivesearch(&buf[0], data, height, width);

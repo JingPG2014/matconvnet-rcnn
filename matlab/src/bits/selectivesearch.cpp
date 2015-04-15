@@ -113,7 +113,7 @@ void filter1D(Out& output, In& data, std::vector<float>& filter,
   }
 }
 
-void angleGrad(std::vector<float>& out, float *smoothed, int height, int width, int channel, float phi)
+void angleGrad(std::vector<float>& out, float const *smoothed, int height, int width, int channel, float phi)
 {
   // Angled derivative
   // First smooth with gaussian then take derivative with [-1,0,1]
@@ -130,7 +130,7 @@ void angleGrad(std::vector<float>& out, float *smoothed, int height, int width, 
   }
 }
 
-static void gaussianBlur(float *output, float *data, int height, int width)
+static void gaussianBlur(float *output, float const *data, int height, int width)
 {
 
   // we only compute centre and positive side of gaussian, since it is symmetric
@@ -309,11 +309,63 @@ void saveCSV(T& pass1, int width, int height, const char * fn)
   fclose(f);
 }
 
-static void computeTextureHistogram(std::vector<int>& histOut, float const *image, float *smoothImage, int *segmentedImage, int height, int width, int nRegions) {
-  float const maxDerivativeValue = 0.43f;
+static void computeColourHistogram(std::vector<float>& histOut, float const *image, int const *segmentedImage, int height, int width, int nRegions)
+{
+  float const maxHistValue = 1.0f;
+
+  // Number of histogram bins
+  int const nBins = 25;
+  // Size of the concatenated histograms over channels (should be 75)
+  int const descriptorSize = nchannels * nBins;
+
+  histOut.resize(nRegions * descriptorSize, 0.f);
+
+  for (int c = 0; c < nchannels; ++c) {
+    for (int i = 0; i < height * width; ++i) {
+      int region = (int) segmentedImage[i];
+      float value = image[c * width * height + i];
+
+      int bin = std::min(nBins - 1, (int) ceil(value * (nBins - 1) / maxHistValue - 0.5f));
+      histOut[region * descriptorSize + c * nBins + bin]++;
+    }
+  }
+
+  // Normalise
+  for (int r = 0; r < nRegions; ++r) {
+    float sum = 0.0f;
+    for(int i = 0; i < descriptorSize; ++i) {
+      sum += histOut[r * descriptorSize + i];
+    }
+    if (sum != 0.0f) {
+      for(int i = 0; i < descriptorSize; ++i) {
+        histOut[r * descriptorSize + i] /= sum;
+      }
+    }
+  }
+
+//  // Print hists for region 18
+//  for (int x=0; x < descriptorSize; ++x) {
+//    printf("%f ", histOut[18 * descriptorSize + x]);
+//  }printf("\n");
+
+}
+
+static void computeTextureHistogram(std::vector<float>& histOut, float const *image, float const *smoothImage,
+                                    int const *segmentedImage, int height, int width, int nRegions)
+{
+  // "maximum" magnitude of the gradient (why?)
+  float const maxHistValue = 0.43f;
+
+  // Number of image derivative histograms per channel
   int const nHists = 8;
+  // Number of histogram bins
   int const nBins = 10;
-  histOut.resize(nchannels * nRegions * nBins * nHists, 0);
+  // Size of the concatenated histograms over channels (should be 240)
+  int const descriptorSize = nchannels * nHists * nBins;
+
+  histOut.resize(0);
+  histOut.resize(nRegions * descriptorSize, 0);
+
   // Layout:
   // Region 1: [channel1: [hist1,...,hist8]] [channel2: [hist1,...,hist8]] [channel3: [hist1,...,hist8]]
   // Region 2: [channel1: [hist1,...,hist8]] [channel2: [hist1,...,hist8]] [channel3: [hist1,...,hist8]]
@@ -340,7 +392,7 @@ static void computeTextureHistogram(std::vector<int>& histOut, float const *imag
 
   for (int c = 0; c < nchannels; ++c) {
 
-    for (int histIdx = 0; histIdx < 4; ++histIdx) {
+    for (int histIdx = 0; histIdx < nHists/2; ++histIdx) {
 
       switch (histIdx) {
       case 0:
@@ -366,36 +418,51 @@ static void computeTextureHistogram(std::vector<int>& histOut, float const *imag
       }
 
       for (int i = 0; i < height * width; ++i) {
-        float region = segmentedImage[i];
+        int region = (int) segmentedImage[i];
         float value = gradIm[i];
 
         // Negative component
         float nvalue = (std::max)(0.f, -value);
-        int bin = ceil(nvalue * (nBins - 1) / maxDerivativeValue - 0.5f);
-        histOut[region * nchannels * nHists * nBins + c * nHists * nBins + histIdx * nBins + bin]++;
+        int bin = (std::min)(nBins - 1, (int) ceil(nvalue * (nBins - 1) / maxHistValue - 0.5f));
+        assert(bin >= 0 && bin < nBins);
+        assert(region * descriptorSize + c * nHists * nBins + histIdx * nBins + bin < histOut.size());
+        histOut[region * descriptorSize + c * nHists * nBins + histIdx * nBins + bin]++;
 
         // Positive component
         float pvalue = (std::max)(0.f, value);
         int pHistIdx = histIdx + 4;
-        bin = ceil(pvalue * (nBins - 1) / maxDerivativeValue - 0.5f);
-        histOut[region * nchannels * nHists * nBins + c * nHists * nBins + pHistIdx * nBins + bin]++;
+        bin = (std::min)(nBins - 1, (int) ceil(pvalue * (nBins - 1) / maxHistValue - 0.5f));
+        histOut[region * descriptorSize + c * nHists * nBins + pHistIdx * nBins + bin]++;
 
-        if (histIdx == 0 && region == 18) {
-          printf("%f -> %d\n", pvalue, bin);
-        }
+        //        if (histIdx == 0 && region == 18) {
+        //          printf("%f -> %d\n", pvalue, bin);
+        //        }
       }
     }
   }
 
-  // Print hists for region 18
-  for (int x=0; x < 240; ++x) {
-    printf("%d ", histOut[18 * nchannels * nHists * nBins + 0 * nHists * nBins + x]);
-  }printf("\n");
+  //  // Print hists for region 18
+  //  for (int x=0; x < 240; ++x) {
+  //    printf("%f ", histOut[18 * descriptorSize + x]);
+  //  }printf("\n");
+
+  // Normalise
+  for (int r = 0; r < nRegions; ++r) {
+    float sum = 0.0f;
+    for(int i = 0; i < descriptorSize; ++i) {
+      sum += histOut[r * descriptorSize + i];
+    }
+    if (sum != 0.0f) {
+      for(int i = 0; i < descriptorSize; ++i) {
+        histOut[r * descriptorSize + i] /= sum;
+      }
+    }
+  }
 
   savePPM(gradIm, width, height, "/tmp/out.ppm", -0.43, 0.43);
 }
 
-void vl::selectivesearch(int *output, float *data, int height, int width)
+void vl::selectivesearch(int *output, float const *data, int height, int width)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
@@ -408,9 +475,11 @@ void vl::selectivesearch(int *output, float *data, int height, int width)
   saveCSV(output, width, height, "/tmp/seg.csv");
 
 
-  std::vector<int> hist;
+  std::vector<float> histTexture;
+  std::vector<float> histColour;
 
-  computeTextureHistogram(hist, data, &blurred[0], &segmented[0], height, width, nRegions);
+  computeTextureHistogram(histTexture, data, &blurred[0], &segmented[0], height, width, nRegions);
+  computeColourHistogram(histColour, data, &segmented[0], height, width, nRegions);
 
   for (int i = 0; i < width * height; ++i) {
     output[i] = segmented[i];

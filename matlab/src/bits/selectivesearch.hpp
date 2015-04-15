@@ -3,7 +3,7 @@
 
 namespace vl {
 
-  void selectivesearch(int *output, float *data, int height, int width);
+  void selectivesearch(int *output, float const *data, int height, int width);
 
 }
 
