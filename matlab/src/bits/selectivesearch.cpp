@@ -8,6 +8,40 @@
 
 static int const nchannels = 3;
 
+template <typename T>
+void savePPM(T& data, int width, int height, const char * fn, float minv=0.f, float maxv=1.f)
+{
+  FILE* f = fopen(fn, "w");
+  fprintf(f, "P6\n%d %d\n255\n", width, height);
+  for (int i = 0; i < height; ++i) {
+    for (int j = 0; j < width; ++j) {
+      float v = data[height*j + i];
+      v = (v - minv)/(maxv - minv);
+      unsigned char b = (unsigned char) std::max(0.f, std::min(255.f, 255.f * v));
+      fwrite(&b,1,1,f);
+      fwrite(&b,1,1,f);
+      fwrite(&b,1,1,f);
+    }
+  }
+  fclose(f);
+}
+
+template <typename T>
+void saveCSV(T& data, int width, int height, const char * fn)
+{
+  FILE* f = fopen(fn, "w");
+  for (int i = 0; i < height; ++i) {
+    for (int j = 0; j < width; ++j) {
+      float v = data[height*j + i];
+      fprintf(f, "%f", v);
+      if (j != width - 1) fprintf(f, ",");
+    }
+    fprintf(f, "\n");
+
+  }
+  fclose(f);
+}
+
 
 /* Selective search from
 * J.R.R. Uijlings, K.E.A. van de Sande, T. Gevers, and A.W.M. Smeulders.
@@ -160,7 +194,7 @@ static void gaussianBlur(float *output, float const *data, int height, int width
   }
 }
 
-static void initialSegmentation(int *output, int& nRegions, float *data, int height, int width)
+static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes, std::vector<int>& neighbours, std::vector<int>& rects, float *data, int height, int width)
 {
   int const minSize = 200;
   float const threshConst = 200.f;
@@ -255,12 +289,14 @@ static void initialSegmentation(int *output, int& nRegions, float *data, int hei
 
   // Compact indices
   std::vector<int> reindexed(nVerts, -1);
+  sizes.clear();
 
   int newIndex = 0;
   for (int i = 0; i < nVerts; ++i) {
     int head = findHead(i, connectionMap);
     if (reindexed[head] == -1) {
       reindexed[head] = newIndex;
+      sizes.push_back(sizeMap[head]);
       newIndex++;
     }
     reindexed[i] = reindexed[head];
@@ -268,45 +304,41 @@ static void initialSegmentation(int *output, int& nRegions, float *data, int hei
 
   nRegions = newIndex;
 
+  // Find neighbour matrix
+  // And store [mini minj maxi maxj] for each region
+  neighbours.clear();
+  neighbours.resize(nRegions * nRegions, false);
+  rects.clear();
+  rects.resize(nRegions * 4, -1);
+  for (int j = 0; j < width; ++j) {
+    int regionAbove;
+    for (int i = 0 ; i < height; ++i) {
+      int region = reindexed[height * j + i];
+      if (i > 0) {
+        neighbours[nRegions * region + regionAbove] = true;
+        neighbours[nRegions * regionAbove + region] = true;
+      }
+      regionAbove = region;
+
+      if (j > 0) {
+        int regionLeft = reindexed[height * (j-1) + i];
+        neighbours[nRegions * region + regionLeft] = true;
+        neighbours[nRegions * regionLeft + region] = true;
+      }
+
+      rects[region * 4 + 0] = rects[region * 4 + 0] == -1 ? i : (std::min)(i, rects[region * 4 + 0]);
+      rects[region * 4 + 1] = rects[region * 4 + 1] == -1 ? j : (std::min)(j, rects[region * 4 + 1]);
+      rects[region * 4 + 2] = (std::max)(i, rects[region * 4 + 2]);
+      rects[region * 4 + 3] = (std::max)(j, rects[region * 4 + 3]);
+    }
+  }
+
   for (int i = 0; i < nVerts; ++i) {
     output[i] = reindexed[i];
   }
 
+  //saveCSV(neighbours, nRegions, nRegions, "/tmp/neighbours.csv");
 
-}
-
-template <typename T>
-void savePPM(T& pass1, int width, int height, const char * fn, float minv=0.f, float maxv=1.f)
-{
-  FILE* f = fopen(fn, "w");
-  fprintf(f, "P6\n%d %d\n255\n", width, height);
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      float v = pass1[height*j + i];
-      v = (v - minv)/(maxv - minv);
-      unsigned char b = (unsigned char) std::max(0.f, std::min(255.f, 255.f * v));
-      fwrite(&b,1,1,f);
-      fwrite(&b,1,1,f);
-      fwrite(&b,1,1,f);
-    }
-  }
-  fclose(f);
-}
-
-template <typename T>
-void saveCSV(T& pass1, int width, int height, const char * fn)
-{
-  FILE* f = fopen(fn, "w");
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      float v = pass1[height*j + i];
-      fprintf(f, "%f", v);
-      if (j != width - 1) fprintf(f, ",", v);
-    }
-    fprintf(f, "%\n");
-
-  }
-  fclose(f);
 }
 
 static void computeColourHistogram(std::vector<float>& histOut, float const *image, int const *segmentedImage, int height, int width, int nRegions)
@@ -318,6 +350,7 @@ static void computeColourHistogram(std::vector<float>& histOut, float const *ima
   // Size of the concatenated histograms over channels (should be 75)
   int const descriptorSize = nchannels * nBins;
 
+  histOut.clear();
   histOut.resize(nRegions * descriptorSize, 0.f);
 
   for (int c = 0; c < nchannels; ++c) {
@@ -363,7 +396,7 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
   // Size of the concatenated histograms over channels (should be 240)
   int const descriptorSize = nchannels * nHists * nBins;
 
-  histOut.resize(0);
+  histOut.clear();
   histOut.resize(nRegions * descriptorSize, 0);
 
   // Layout:
@@ -467,13 +500,15 @@ void vl::selectivesearch(int *output, float const *data, int height, int width)
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
   std::vector<int> segmented(height * width);
+  std::vector<int> regionSizes;
+  std::vector<int> neighbours;
+  std::vector<int> rects;
 
   gaussianBlur(&blurred[0], data, height, width);
 
-  initialSegmentation(&segmented[0], nRegions, &blurred[0], height, width);
-  savePPM(output, width, height, "/tmp/seg.ppm", 0., nRegions);
-  saveCSV(output, width, height, "/tmp/seg.csv");
-
+  initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0], height, width);
+  savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
+  saveCSV(segmented, width, height, "/tmp/seg.csv");
 
   std::vector<float> histTexture;
   std::vector<float> histColour;
