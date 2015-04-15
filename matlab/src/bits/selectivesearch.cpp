@@ -266,7 +266,7 @@ static void initialSegmentation(int *output, int& nRegions, float *data, int hei
     reindexed[i] = reindexed[head];
   }
 
-  nRegions = newIndex - 1;
+  nRegions = newIndex;
 
   for (int i = 0; i < nVerts; ++i) {
     output[i] = reindexed[i];
