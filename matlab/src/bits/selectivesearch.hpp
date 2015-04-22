@@ -1,9 +1,11 @@
 #ifndef __vl__selectivesearch__
 #define __vl__selectivesearch__
 
+#include <vector>
+
 namespace vl {
 
-  void selectivesearch(int *output, float const *data, int height, int width);
+  void selectivesearch(std::vector<int> &rects, float const *data, int height, int width);
 
 }
 

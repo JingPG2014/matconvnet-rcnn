@@ -37,12 +37,17 @@ void mexFunction(int nout, mxArray *out[],
 
   float const *data = (float *) mxGetData(in[0]);
 
-  std::vector<int> buf(height*width);
-  vl::selectivesearch(&buf[0], data, height, width);
+  std::vector<int> rects;
+  vl::selectivesearch(rects, data, height, width);
 
-  out[0] = mxCreateDoubleMatrix(dims[0], dims[1], mxREAL);
-  for (int i = 0; i < width*height; ++i) {
-    mxGetPr(out[0])[i] = buf[i];
+  int nRects = rects.size() / 4;
+  out[0] = mxCreateDoubleMatrix(nRects, 4, mxREAL);
+  // Make column major and +1 for matlab indexing
+  double *rectsOut = mxGetPr(out[0]);
+  for (int i = 0; i < nRects; ++i) {
+    rectsOut[i + nRects * 0] = (double) rects[i * 4] + 1;
+    rectsOut[i + nRects * 1] = (double) rects[i * 4 + 1] + 1;
+    rectsOut[i + nRects * 2] = (double) rects[i * 4 + 2] + 1;
+    rectsOut[i + nRects * 3] = (double) rects[i * 4 + 3] + 1;
   }
-
 }

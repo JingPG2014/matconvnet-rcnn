@@ -194,7 +194,7 @@ static void gaussianBlur(float *output, float const *data, int height, int width
   }
 }
 
-static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes, std::vector<int>& neighbours, std::vector<int>& rects, float *data, int height, int width)
+static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes, std::vector<bool>& neighbours, std::vector<int>& rects, float *data, int height, int width)
 {
   int const minSize = 200;
   float const threshConst = 200.f;
@@ -436,7 +436,7 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
       case 1:
         // 45 deg
         angleGrad(gradIm, smoothImage, height, width, c, 45.f * (M_PI/180.f));
-        if(c==0)saveCSV(gradIm, width, height, "/tmp/45.csv");
+        //if(c==0)saveCSV(gradIm, width, height, "/tmp/45.csv");
         break;
       case 2:
         // X dir
@@ -446,7 +446,7 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
       case 3:
         // 135 deg
         angleGrad(gradIm, smoothImage, height, width, c, 135.f * (M_PI/180.f));
-        if(c==0)saveCSV(gradIm, width, height, "/tmp/135.csv");
+        //if(c==0)saveCSV(gradIm, width, height, "/tmp/135.csv");
         break;
       }
 
@@ -492,23 +492,181 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
     }
   }
 
-  savePPM(gradIm, width, height, "/tmp/out.ppm", -0.43, 0.43);
+  //savePPM(gradIm, width, height, "/tmp/out.ppm", -0.43, 0.43);
 }
 
-void vl::selectivesearch(int *output, float const *data, int height, int width)
+float similarity(int ri, int rj, int nRegions, int imSize, std::vector<float>& histColour, std::vector<float>& histTexture,
+                 std::vector<int>& regionSizes, std::vector<int>& rects)
+{
+  // Colour - histogram intersection
+  float colour = 0.0f;
+  int hsize = histColour.size()/nRegions;
+  for (int i = 0; i < hsize; ++i) {
+    colour += (std::min)(histColour[ri * hsize + i], histColour[rj * hsize + i]);
+  }
+
+  // Texture
+  float texture = 0.0f;
+  int tsize = histTexture.size()/nRegions;
+  for (int i = 0; i < tsize; ++i) {
+    texture += (std::min)(histTexture[ri * tsize + i], histTexture[rj * tsize + i]);
+  }
+
+  // Size
+  float size = (imSize - regionSizes[ri] - regionSizes[rj]) / (float) imSize;
+
+  // Fill
+  int h = (std::max)(rects[ri*4+2], rects[rj*4+2]) - (std::min)(rects[ri*4], rects[rj*4]) + 1;
+  int w = (std::max)(rects[ri*4+3], rects[rj*4+3]) - (std::min)(rects[ri*4+1], rects[rj*4+1]) + 1;
+  float fill = 1.f - (h*w - regionSizes[ri] - regionSizes[rj])/((float) imSize);
+
+  float sim = (colour + texture + size + fill)/4.f;
+
+  assert(sim >= 0.f && sim <= 1.f);
+
+  return sim;
+}
+
+void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std::vector<bool>& neighbours, std::vector<float>& histColour,
+                  std::vector<float>& histTexture, std::vector<int>& regionSizes, std::vector<int>& rects)
+{
+  // The indices of neighbouring regions ri and rj are stored in
+  // regioni and regionj with the similarity associated with the edge
+  // between them stored in similarities.
+  std::vector<float> similarities;
+  std::vector<int> regioni;
+  std::vector<int> regionj;
+
+  // Create list of similarities between regions
+  // using lower triangle of neighbour matrix
+  for (int r = 0; r < nRegions; ++r) {
+    for (int c = 0; c < r; ++c) {
+      if(neighbours[c * nRegions + r]) {
+          similarities.push_back(similarity(r, c, nRegions, imSize, histColour, histTexture, regionSizes, rects));
+          regioni.push_back(r);
+          regionj.push_back(c);
+      }
+    }
+  }
+
+  int nInitRegions = nRegions;
+  int histColourDescSize = histColour.size()/nRegions;
+  int histTexDescSize = histTexture.size()/nRegions;
+
+  // Iteratively group the 2 most similar regions
+  // until we end up with a single region that is the
+  // whole image
+  while (true) {
+    int newRegionIdx = regionSizes.size();
+    float maxSim = -1.f;
+    int maxIdx = -1;
+    int nSims = 0;
+
+    // Find two most similar regions
+    for (int i = 0; i < similarities.size(); ++i) {
+      if (similarities[i] > maxSim) {
+        maxSim = similarities[i];
+        maxIdx = i;
+      }
+      if (similarities[i] != -1) nSims++;
+    }
+
+    //printf("%d rects, %d sims\n", rects.size(), nSims);
+
+    // finish if we have grouped all regions
+    if (maxIdx == -1) {
+      assert (nSims == 0);
+      assert (regionSizes.size() == nInitRegions * 2 - 1);
+      break;
+    }
+
+    // "delete" the edge between the two regions
+    similarities[maxIdx] = -1;
+
+    // Merge regions, combining their descriptors (size, rectangles, histograms)
+    // and updating the relevant vectors
+    int ri = regioni[maxIdx];
+    int rj = regionj[maxIdx];
+    //printf("Merging %d %d (%f)\n", ri, rj, maxSim);
+
+    int newSize = regionSizes[ri] + regionSizes[rj];
+    regionSizes.push_back(newSize);
+
+    int mini = (std::min)(rects[ri*4], rects[rj*4]);
+    int minj = (std::min)(rects[ri*4+1], rects[rj*4+1]);
+    int maxi = (std::max)(rects[ri*4+2], rects[rj*4+2]);
+    int maxj = (std::max)(rects[ri*4+3], rects[rj*4+3]);
+    rects.push_back(mini);
+    rects.push_back(minj);
+    rects.push_back(maxi);
+    rects.push_back(maxj);
+
+    for (int i = 0; i < histColourDescSize; ++i) {
+      histColour.push_back((regionSizes[ri] * histColour[ri * histColourDescSize + i]
+                           + regionSizes[rj] * histColour[rj * histColourDescSize + i])/ (float) newSize);
+    }
+
+    for (int i = 0; i < histTexDescSize; ++i) {
+      histTexture.push_back((regionSizes[ri] * histTexture[ri * histTexDescSize + i]
+                           + regionSizes[rj] * histTexture[rj * histTexDescSize + i])/ (float) newSize);
+    }
+
+    nRegions++;
+
+    // Remove similarities involving the neighbours of the old regions (ri, rj)
+    // that have been merged and add new similarities between the merged region
+    // (identified by newRegionIdx) and those neighbours (neighbourRegion).
+    // Use a bool vector to avoid adding duplicate edges.
+    std::vector<bool> edgeAdded(nInitRegions * 2);
+
+    // Vector grows within loop, but only loop over
+    // the initial elements
+    int simInitSize = similarities.size();
+    for (int s = 0; s < simInitSize; ++s) {
+      // ignore "deleted" edges
+      if (similarities[s] == -1) continue;
+
+      // Identify regions neighbouring the two regions
+      // that will be merged
+      int neighbourRegion = -1;
+      if (regioni[s] == ri || regioni[s] == rj) {
+        neighbourRegion = regionj[s];
+      } else if (regionj[s] == ri || regionj[s] == rj){
+        neighbourRegion = regioni[s];
+      }
+
+      // If edge s involves ri or rj, "delete" it by setting the similarity to -1.
+      // Then, if we do not yet have an edge between our merged region and neighbourRegion,
+      // create one by computing the similarity and updating the relevant vectors.
+      if (neighbourRegion != -1) {
+        similarities[s] = -1.0f;
+        //printf("Remove (%d %d)\n", regioni[s], regionj[s]);
+        if (!edgeAdded[neighbourRegion]) {
+          similarities.push_back(similarity(neighbourRegion, newRegionIdx, nRegions, imSize, histColour, histTexture, regionSizes, rects));
+          regioni.push_back(neighbourRegion);
+          regionj.push_back(newRegionIdx);
+          edgeAdded[neighbourRegion] = true;
+          //printf("Added (%d %d): %f\n", neighbourRegion, newRegionIdx, similarities[similarities.size()-1]);
+        }
+      }
+    }
+  }
+}
+
+void vl::selectivesearch(std::vector<int>& rects, float const *data, int height, int width)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
   std::vector<int> segmented(height * width);
   std::vector<int> regionSizes;
-  std::vector<int> neighbours;
-  std::vector<int> rects;
+  std::vector<bool> neighbours;
+  //std::vector<int> rects;
 
   gaussianBlur(&blurred[0], data, height, width);
 
   initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0], height, width);
-  savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
-  saveCSV(segmented, width, height, "/tmp/seg.csv");
+  //savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
+  //saveCSV(segmented, width, height, "/tmp/seg.csv");
 
   std::vector<float> histTexture;
   std::vector<float> histColour;
@@ -516,8 +674,7 @@ void vl::selectivesearch(int *output, float const *data, int height, int width)
   computeTextureHistogram(histTexture, data, &blurred[0], &segmented[0], height, width, nRegions);
   computeColourHistogram(histColour, data, &segmented[0], height, width, nRegions);
 
-  for (int i = 0; i < width * height; ++i) {
-    output[i] = segmented[i];
-  }
+  std::vector<int> mergedRegions;
+  mergeRegions(mergedRegions, nRegions, height*width, neighbours, histColour, histTexture, regionSizes, rects);
 
 }
