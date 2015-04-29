@@ -9,6 +9,7 @@
 \usepackage{listings}
 \usepackage{color}
 \usepackage{textcomp}
+\usepackage{fancyvrb}
 \usepackage[colorlinks]{hyperref}
 \newcommand{\real}{\mathbb{R}}
 \newcommand{\vv}{\operatorname{vec}}
@@ -20,6 +21,8 @@
 \newcommand{\by}{\mathbf{y}}
 \newcommand{\bz}{\mathbf{z}}
 \newcommand{\bff}{\mathbf{f}}
+\newcommand{\br}{\mathbf{r}}
+
 \newcommand{\bw}{\mathbf{w}}
 \newcommand{\bs}{\mathbf{s}}
 \newcommand{\bfe}{\mathbf{e}}
@@ -28,6 +31,8 @@
 
 \tikzstyle{block} = [draw, rectangle, minimum height=3em, minimum width=3em] \tikzstyle{data} = []
 \tikzstyle{pinstyle} = [pin edge={to-,thin,black}]
+
+\VerbatimFootnotes
 
 % Taken inspiration from http://www.tjansson.dk/2008/11/using-lstlisting-to-include-code-in-latex/
 \definecolor{listinggray}{gray}{0.9}
@@ -240,7 +245,7 @@ The derivative of $z \circ f$ with respect to $\bx$ and $\bw$ are given by:
 \]
 We note two facts. The first one is that, since $z$ is a scalar function, the derivatives have a number of elements equal to the number of parameters. So in particular $dz/d\vv \bx^\top$ can be reshaped into an array $dz/d\bx$ with the same shape of $\bx$, and the same applies to the derivatives $dz/d\by$ and $dz/d\bw$. Beyond the notational convenience, this means that storage for the derivatives is not larger than the storage required for the model parameters and forward evaluation.
 
-The second fact is that computing $dz/d\bx$ and $dz/d\bw$ require the derivative $dz/d\by$. The latter can be obtained by applying this calculation recursively to the next block in the chain.
+The second fact is that computing $dz/d\bx$ and $dz/d\bw$ requires the derivative $dz/d\by$. The latter can be obtained by applying this calculation recursively to the next block in the chain.
 
 % ------------------------------------------------------------------
 \subsection{CNN modularity}\label{s:modularity}
@@ -252,13 +257,44 @@ Sections~\ref{s:forward} and~\ref{s:backward} suggests a modular programming int
 \item {\bf Backward messages:} Evaluation of the CNN derivative $dz/d\bx$ and $dz/d\bw$ with respect to the block input data $\bx$ and parameters $\bw$ given the block input data $\bx$ and paramters $\bw$ as well as the CNN derivative $dx/d\by$ with respect to the block output data $\by$.
 \end{itemize}
 
+% ------------------------------------------------------------------
+\subsection{Working with DAGs}\label{s:dag}
+% ------------------------------------------------------------------
 
+CNN can also be obtained from more complex composition of functions forming a DAG. There are $n+1$ variables $\bx_i$ and $n$ functions $f_i$ with corresponding arguments $\br_{ik}$:
+\begin{align*}
+\bx_0 &\\
+\bx_1 &= f_1(\br_{1,1},\dots,\br_{1,m_1}),\\
+\bx_2 &= f_2(\br_{2,1},\dots,\br_{2,m_2}),\\
+&\vdots\\
+\bx_n &= f_n(\br_{n,1},\dots,\br_{n,m_n})
+\end{align*}
+Variables are connected to arguments by relations
+\[
+     \br_{ik} = \bx_{\pi_{ik}}
+\]
+where $\pi_{ik}$ denotes the variable $\bx_{\pi_{ik}}$  that feeds argument $\br_{ik}$. Together with the implicit fact that each argument $\br_{ik}$ feeds into the  variable $\bx_i$ through function $f_i$, this defines a bipartite DAG representing the dependencies  between variables and argument. The DAG is bipartite. This DAG must be acyclic, hence assuring that, given the value of the input $\bx_0$, all other variables can be evaluated iteratively. Due to this property, without loss of generality we will assume that variables $\bx_0,\bx_1,\dots,\bx_n$ are sorted such that $\bx_i$ depends only on variables that come before in the order (i.e. one always has $\pi_{ik} < i$).
+
+Now assume that $\bx_n = z$ is a scalar network output (usually the learning loss). As before, we are interested in computing derivatives of this function with respect to the network variables. In order to do so, write the output of the DAG $z(\bx_i)$ as a function of the variable $\bx_i$; this has the following interpretation: the DAG is modified by removing function $f_i$ and making $\bx_i$ an input, setting $\bx_i$ to the specified value, setting all the other inputs to the working point at which the derivative should be computed, and evaluating the resulting DAG. Likewise, one can define functions $z(\br_{ij})$ for the arguments. The derivative with respect to $\bx_j$ can then be expressed as
+\[
+   \frac{dz}{d(\vv \bx_j)^\top}
+   =
+  \sum_{(i,k): \pi_{ik}=j}
+  \frac{dz}{d(\vv \bx_i)^\top}
+  \frac{d\vv \bx_i}{d(\vv \br_{ik})^\top}
+  \frac{d\vv \br_{ik}}{d(\vv \bx_j)^\top}
+   =
+   \sum_{(i,k): \pi_{ik}=j}
+   \frac{dz}{d(\vv \bx_i)^\top}
+   \frac{d\vv f_i}{d(\vv \br_{ik})^\top}.
+\]
+Note that these quantities can be computer recursively, backward from the output $z$. In this case, each variable node $\bx_i$ (corresponding to $f_i$) stores the derivative  $dz/d \bx_i$. When node $\bx_i$ is processed, the derivatives $d\vv f_i /d(\vv \br_{ik})^\top$ are computed for the $m_i$ arguments of the corresponding function $f_i$ pre-multiplied by the factor $dz/d \bx_i$ (available at that node) and then accumulated to the corresponding parent variables $\bx_j$'s derivatives $dz/d \bx_j$.
 
 % ------------------------------------------------------------------
 \section{Computational blocks}\label{s:blocks}
 % ------------------------------------------------------------------
 
-This section describes the individual computational block supported by the \vlnn. The interface of a CNN computational block follows Section~\ref{s:modularity}. The block can be evaluated as a MATLAB function \verb!y = vl_nn<block>(x,w)! that takes as input arrays \verb!x! and \verb!w! representing the input data and parameters of the block and returns an array \verb!y! as output. \verb!x! and \verb!y! are 4D real arrays packing $N$ maps or images, as discussed above, whereas \verb!\bw! may have an arbitrary shape.
+This section describes the individual computational block supported by the \vlnn. The interface of a CNN computational block follows Section~\ref{s:modularity}. The block can be evaluated as a MATLAB function \verb!y = vl_nn<block>(x,w)! that takes as input arrays \verb!x! and \verb!w! representing the input data and parameters of the block and returns an array \verb!y! as output. \verb!x! and \verb!y! are 4D real arrays packing $N$ maps or images, as discussed above, whereas \verb!w! may have an arbitrary shape.
 
 In order to compute the block derivatives, the same function can take a third optional argument \verb!dzdy! representing the derivative of the output of the network with respect to $\by$ and returns the corresponding derivatives \verb![dzdx,dzdw] = vl_nn<block>(x,w,dzdy)!. \verb!dzdx!, \verb!dzdy! and \verb!dzdw! are array with the same dimension of \verb!x!, \verb!y! and \verb!w! respectively, as discussed in Section~\ref{s:backward}.
 
@@ -289,7 +325,7 @@ b_k
 \sum_{i'=1}^{H'}
 \sum_{j'=1}^{W'}
 \sum_{d=1}^D
-f_{i'j'd} \times x_{i''+i',j''+j',d,k}.
+f_{i'j'd} \times x_{i''+i'-1,j''+j'-1,d,k}.
 \]
 The call \verb!vl_nnconv(x,f,[])! does not use the biases. Note that the function works with arbitrarily sized inputs and filters (as opposed to, for example, square images).
 
@@ -297,21 +333,7 @@ The call \verb!vl_nnconv(x,f,[])! does not use the biases. Note that the functio
 \[
   W'' = W - W' + 1
 \]
-possible translations of the filters in the horizontal direction such that the filter is entirely contained in the input $\bx$. Hence, by default the filtered signal $\by$ has width $W''$. However, \verb!vl_nnconv! accepts a padding parameters $[P_t,P_b,P_l,P_r]$ whose effect is to virtually pad with zeros the signal $\bx$ in the top, bottom, left, and right  spatial directions respectively. In this case, the output signal has width
-\[
-  W'' = W + (P_l + P_r) - W' + 1.
-\]
-\verb!vl_nnconv! also accepts a stride parameter $(\delta_w,\delta_h)$ to subsample the output. In this case, if $j$ is the column index of the output signal $\by$, its maximum value is given by:
-\[
-(j-1)\delta_w + W' \leq W + (P_l+P_r).
-\]
-Hence the width of $\by$ is given by
-\[
-W'' = \lfloor
-\frac{W + P_l+P_r - W'}{\delta_w}
-\rfloor + 1
-\]
-samples. Similar relations apply to the signal heights $H,H'$ and $H''$.
+possible translations of the filters in the horizontal direction such that the filter is entirely contained in the input $\bx$. Hence, by default the filtered signal $\by$ has width $W''$. However, \verb!vl_nnconv! accepts a padding parameters $[P_h^-,P_h^+,P_w^-,P_w^+]$ whose effect is to virtually pad with zeros the signal $\bx$ in the top, bottom, left, and right  spatial directions respectively. In this case, these relations are more complex and derived in Sect.~\ref{s:receptive}.
 
 \paragraph{Fully connected layers.} In other libraries, a \emph{fully connected blocks or layers} are blocks where each output dimension linearly depends on all the input dimensions. \vlnn does not distinguishes between fully connected layers and convolutional blocks. Instead, the former is a special case of the latter obtained when the output map $\by$ has dimensions $W''=H''=1$. Internally, \verb!vl_nnconv! handle this case more efficiently if possible.
 
@@ -402,12 +424,12 @@ where $X\in\real^{(H'W')\times D}$ is the matrix obtained by reshaping $\bx$. No
 
 \verb!vl_nnpool! implements max and sum pooling. The \emph{max pooling} operator computes the maximum response of each feature channel in a $H' \times W'$ patch
 \[
-y_{i''j''d} = \max_{1\leq i' \leq H', 1 \leq j' \leq W'} x_{i''+i',j''+j',d}.
+y_{i''j''d} = \max_{1\leq i' \leq H', 1 \leq j' \leq W'} x_{i''+i-1',j''+j'-1,d}.
 \]
-resulting in an output of size $\by\in\real^{H''\times W'' \times D}$, similar to the convolution operator of Sectino~\ref{s:convolution}. Sum-pooling computes the average of the values instead:
+resulting in an output of size $\by\in\real^{H''\times W'' \times D}$, similar to the convolution operator of Section~\ref{s:convolution}. Sum-pooling computes the average of the values instead:
 \[
 y_{i''j''d} = \frac{1}{W'H'}
-\sum_{1\leq i' \leq H', 1 \leq j' \leq W'} x_{i''+i',j''+j',d}.
+\sum_{1\leq i' \leq H', 1 \leq j' \leq W'} x_{i''+i'-1,j''+j'-1,d}.
 \]
 
 \paragraph{Padding and stride.} Similar to the convolution operator of Sect.~\ref{s:convolution}, \verb!vl_nnpool! supports padding the input; however, the effect is different from padding in the convolutional block as pooling regions straddling the image boundaries are cropped. For max pooling, this is equivalent to extending the input data with $-\infty$; for sum pooling, this is similar to padding with zeros, but the normalization factor at the boundaries is smaller to account for the smaller integration area.
@@ -436,7 +458,11 @@ S(\bx)^\top
 \end{equation}
 
 % ------------------------------------------------------------------
-\subsection{ReLU}\label{s:relu}
+\subsection{Activation non-linearities}\label{s:activation}
+% ------------------------------------------------------------------
+
+% ------------------------------------------------------------------
+\subsubsection{ReLU}\label{s:relu}
 % ------------------------------------------------------------------
 
 \verb!vl_nnrelu! computes the \emph{Rectified Linear Unit} (ReLU):
@@ -458,7 +484,41 @@ S(\bx)^\top
 where $\bs = [\vv \bx > 0] \in\{0,1\}^{HWD}$ is an indicator vector.
 
 % ------------------------------------------------------------------
+\subsubsection{Sigmoid}\label{s:sigmoid}
+% ------------------------------------------------------------------
+
+\verb!vl_nnsigmoid! computes the \emph{sigmoid}:
+\[
+ y_{ijd} = \sigma(x_{ijd}) = \frac{1}{1+e^{-x_{ijd}}}.
+\]
+
+\paragraph{Implementation details.} The derivative is given by
+\begin{align*}
+\frac{dz}{dx_{ijk}}
+&= 
+\frac{dz}{d y_{ijd}} 
+\frac{d y_{ijd}}{d x_{ijd}}
+=
+\frac{dz}{d y_{ijd}} 
+\frac{-1}{(1+e^{-x_{ijd}})^2} ( - e^{-x_{ijd}})
+\\
+&=
+\frac{dz}{d y_{ijd}} 
+y_{ijd} (1 - y_{ijd}).
+\end{align*}
+In matrix notation:
+\[
+\frac{dz}{d\bx} = \frac{dz}{d\by} \odot 
+\by \odot 
+(\mathbf{1}\mathbf{1}^\top - \by).
+\]
+
+% ------------------------------------------------------------------
 \subsection{Normalization}\label{s:normalization}
+% ------------------------------------------------------------------
+
+% ------------------------------------------------------------------
+\subsubsection{Cross-channel normalization}\label{s:normalization}
 % ------------------------------------------------------------------
 
 \verb!vl_nnnormalize! implements a cross-channel normalization operator. Normalization applied independently at each spatial location and groups of channels to get:
@@ -484,10 +544,177 @@ where
 \]
 
 % ------------------------------------------------------------------
-\subsection{Softmax}\label{s:softmax}
+\subsubsection{Batch normalization}\label{s:bnorm}
 % ------------------------------------------------------------------
 
-\verb!vl_softmax! computes the softmax operator:
+\verb!vl_nnbnorm! implements batch normalization~\cite{ioffe2015}. Batch normalization is somewhat different from other neural network blocks in that it performs computation across images/feature maps in a batch (whereas most blocks process different images/feature maps individually). \verb!y = vl_nnbnorm(x, w, b)! normalizes each channel of the feature map $\mathbf{x}$ averaging over spatial locations and batch instances. Let $T$ the batch size; then
+\[
+\mathbf{x}, \mathbf{y} \in \mathbb{R}^{H \times W \times K \times T},
+\qquad\mathbf{w} \in \mathbb{R}^{K},
+\qquad\mathbf{b} \in \mathbb{R}^{K}.
+\]
+Note that in this case the input and output arrays are explicitly treated as 4D tensors in order to work with a batch of feature maps. The tensors  $\mathbf{w}$ and $\mathbf{b}$ define component-wise multiplicative and additive constants. The output feature map is given by
+\[
+y_{ijkt} = w_k \frac{x_{ijkt} - \mu_{k}}{\sqrt{\sigma_k^2 + \epsilon}} + b_k,
+\quad
+\mu_{k} = \frac{1}{HWT}\sum_{i=1}^H \sum_{j=1}^W \sum_{t=1}^{T} x_{ijkt},
+\quad
+\sigma^2_{k} = \frac{1}{HWT}\sum_{i=1}^H \sum_{j=1}^W \sum_{t=1}^{T} (x_{ijkt} - \mu_{k})^2.
+\]
+
+\paragraph{Implementation details.} The derivative of the input with respect to the network output is computed as follows:
+\[
+\frac{dz}{dx_{ijkt}} = \sum_{i''j''k''t''}
+\frac{dz}{d y_{i''j''k''t''}} 
+\frac{d y_{i''j''k''t''}}{d x_{ijkt}}.
+\]
+Since feature channels are processed independently, all terms with $k''\not=k$ are null. Hence
+\[
+\frac{dz}{dx_{ijkt}} = \sum_{i''j''t''}
+\frac{dz}{d y_{i''j''kt''}} 
+\frac{d y_{i''j''kt''}}{d x_{ijkt}},
+\]
+where
+\[
+\frac{d y_{i''j''kt''}}{d x_{ijkt}} 
+=
+w_k
+\left(\delta_{i=i'',j=j'',t=t''} - \frac{d \mu_k}{d x_{ijkt}}\right)
+\frac{1}{\sqrt{\sigma^2_k + \epsilon}}
+-
+\frac{w_k}{2}
+\left(x_{i''j''kt''} - \mu_k\right)
+\left(\sigma_k^2 + \epsilon \right)^{-\frac{3}{2}}
+\frac{d \sigma_k^2}{d x_{ijkt}},
+\]
+the derivatives with respect to the mean and variance are computed as follows:
+\begin{align*}
+\frac{d \mu_k}{d x_{ijkt}} &= \frac{1}{HWT},
+\\
+\frac{d \sigma_k^2}{d x_{i'j'kt'}}
+&=
+\frac{2}{HWT}
+\sum_{ijt}
+\left(x_{ijkt} - \mu_k \right)
+\left(\delta_{i=i',j=j',t=t'} - \frac{1}{HWT} \right)
+=
+\frac{2}{HWT} \left(x_{i'j'kt'} - \mu_k \right),
+\end{align*}
+and $\delta_E$ is the indicator function of the event $E$. Hence
+\begin{align*}
+\frac{dz}{dx_{ijkt}}
+&=
+\frac{w_k}{\sqrt{\sigma^2_k + \epsilon}}
+\left(
+\frac{dz}{d y_{ijkt}} 
+-
+\frac{1}{HWT}\sum_{i''j''kt''}
+\frac{dz}{d y_{i''j''kt''}} 
+\right)
+\\
+&-
+\frac{w_k}{2(\sigma^2_k + \epsilon)^{\frac{3}{2}}}
+\sum_{i''j''kt''}
+\frac{dz}{d y_{i''j''kt''}} 
+\left(x_{i''j''kt''} - \mu_k\right)
+\frac{2}{HWT} \left(x_{ijkt} - \mu_k \right)
+\end{align*}
+i.e.
+\begin{align*}
+\frac{dz}{dx_{ijkt}}
+&=
+\frac{w_k}{\sqrt{\sigma^2_k + \epsilon}}
+\left(
+\frac{dz}{d y_{ijkt}} 
+-
+\frac{1}{HWT}\sum_{i''j''kt''}
+\frac{dz}{d y_{i''j''kt''}} 
+\right)
+\\
+&-
+\frac{w_k}{\sigma^2_k + \epsilon}
+\,
+\frac{x_{ijkt} - \mu_k}{\sqrt{\sigma^2_k + \epsilon}}
+\,
+\frac{1}{HWT}
+\sum_{i''j''kt''}
+\frac{dz}{d y_{i''j''kt''}} 
+\left(x_{i''j''kt''} - \mu_k\right).
+\end{align*}
+
+% ------------------------------------------------------------------
+\subsubsection{Spatial normalization}\label{s:spnorm}
+% ------------------------------------------------------------------
+
+\verb!vl_nnspnorm! implements spatial normalization. Spatial normalization operator acts on different feature channels independently and rescales each input feature by the energy of the features in a local neighborhood . First, the energy of the features is evaluated in a neighbourhood $W'\times H'$
+\[
+n_{i''j''d}^2 = \frac{1}{W'H'}
+\sum_{1\leq i' \leq H', 1 \leq j' \leq W'} x^2_{
+i''+i'-1-\lfloor \frac{H'-1}{2}\rfloor,
+j''+j'-1-\lfloor \frac{W'-1}{2}\rfloor,
+d}.
+\]
+In practice, the factor $1/W'H'$ is adjusted at the boundaries to account for the fact that neighbors must be cropped. Then this is used to normalize the input:
+\[
+y_{i''j''d} = \frac{1}{(1 + \alpha n_{i''j''d}^2)^\beta} x_{i''j''d}.
+\]
+
+\paragraph{Implementation details.} The neighborhood norm$n^2_{i''j''d}$ can be computed by applying average pooling to $x_{ijd}^2$ using \verb!vl_nnpool! with a $W'\times H'$ pooling region, top padding $\lfloor \frac{H'-1}{2}\rfloor$, bottom padding $H'-\lfloor \frac{H-1}{2}\rfloor-1$, and similarly for the horizontal padding.
+
+The derivative of spatial normalization can be obtained as follows:
+\begin{align*}
+\frac{dz}{dx_{ijd}} 
+&= \sum_{i''j''d}
+\frac{dz}{d y_{i''j''d}} 
+\frac{d y_{i''j''d}}{d x_{ijd}}
+\\
+&=
+\sum_{i''j''d}
+\frac{dz}{d y_{i''j''d}} 
+(1 + \alpha n_{i''j''d}^2)^{-\beta}
+\frac{dx_{i''j''d}}{d x_{ijd}} 
+-\alpha\beta
+\frac{dz}{d y_{i''j''d}} 
+(1 + \alpha n_{i''j''d}^2)^{-\beta-1}
+x_{i''j''d}
+\frac{dn_{i''j''d}^2}{d (x^2_{ijd})} 
+\frac{dx^2_{ijd}}{d x_{ijd}}
+\\
+&=
+\frac{dz}{d y_{ijd}} 
+(1 + \alpha n_{ijd}^2)^{-\beta}
+-2\alpha\beta x_{ijd}
+\left[
+\sum_{i''j''d}
+\frac{dz}{d y_{i''j''d}} 
+(1 + \alpha n_{i''j''d}^2)^{-\beta-1}
+x_{i''j''d}
+\frac{dn_{i''j''d}^2}{d (x_{ijd}^2)}
+\right]
+\\
+&=
+\frac{dz}{d y_{ijd}} 
+(1 + \alpha n_{ijd}^2)^{-\beta}
+-2\alpha\beta x_{ijd}
+\left[
+\sum_{i''j''d}
+\eta_{i''j''d}
+\frac{dn_{i''j''d}^2}{d (x_{ijd}^2)}
+\right],
+\quad
+\eta_{i''j''d}=
+\frac{dz}{d y_{i''j''d}} 
+(1 + \alpha n_{i''j''d}^2)^{-\beta-1}
+x_{i''j''d}
+\end{align*}
+Note that the summation can be computed as the derivative of the
+\verb!vl_nnpool! block.
+
+% ------------------------------------------------------------------
+\subsubsection{Softmax}\label{s:softmax}
+% ------------------------------------------------------------------
+
+\verb!vl_nnsoftmax! computes the softmax operator:
 \[
  y_{ijk} = \frac{e^{x_{ijk}}}{\sum_{t=1}^D e^{x_{ijt}}}.
 \]
@@ -533,7 +760,11 @@ where $X,Y\in\real^{HW\times D}$ are the matrices obtained by reshaping the arra
 $\bx$ and $\by$. Note that the numerical implementation of this expression is straightforward once the output $Y$ has been computed with the caveats above.
 
 % ------------------------------------------------------------------
-\subsection{Log-loss}\label{s:loss}
+\subsection{Losses and comparisons}\label{s:losses}
+% ------------------------------------------------------------------
+
+% ------------------------------------------------------------------
+\subsubsection{Log-loss}\label{s:loss}
 % ------------------------------------------------------------------
 
 \verb!vl_logloss! computes the \emph{logarithmic loss}
@@ -548,7 +779,7 @@ where $c \in \{1,2,\dots,D\}$ is the ground-truth class. Note that the operator 
 \]
 
 % ------------------------------------------------------------------
-\subsection{Softmax log-loss}\label{s:sfloss}
+\subsubsection{Softmax log-loss}\label{s:sfloss}
 % ------------------------------------------------------------------
 
 \verb!vl_softmaxloss! combines the softmax layer and the log-loss into one step for improved numerical stability. It computes
@@ -571,6 +802,203 @@ where $y_{ijc}$ is the output of the softmax layer. In matrix form:
 \]
 where $X,Y\in\real^{HW\times D}$ are the matrices obtained by reshaping the arrays
 $\bx$ and $\by$ and $\bfe_c$ is the indicator vector of class $c$.
+
+% ------------------------------------------------------------------
+\subsubsection{$p$-distance}\label{s:pdistance}
+% ------------------------------------------------------------------
+
+The \verb!vl_nnpdistp! function computes the $p$-th power $p$-distance between the vectors in the input data $\bx$ and a target $\bar\bx$:
+\[
+  y_{ij} = \sum_d |x_{ijd} - \bar x_{ijd}|^p, \qquad p > 0.
+\]
+Note that this operator is applied convolutionally, i.e. at each spatial location $ij$ one extracts and compares vectors $x_{ij:}$. There is also a variant \verb!vl_nnpdist!  computing the distance itself (not raised to the $p$-th power:
+\[
+  y_{ij} = \left(\sum_d |x_{ijd} - \bar x_{ijd}|^p\right)^\frac{1}{p}
+\]
+
+\paragraph{Implementation details.} The derivative of the first operator is given by:
+\begin{align*}
+\frac{dz}{dx_{ijd}}
+&=
+\frac{dz}{dy_{ij}}
+p |x_{ijd} - \bar x_{ijd}|^{p-1} \operatorname{sign} (x_{ijd} - \bar x_{ijd})
+\\
+&=
+\frac{dz}{dy_{ij}}
+p |x_{ijd} - \bar x_{ijd}|^{p-2} (x_{ijd} - \bar x_{ijd}).
+\end{align*}
+The derivative of the second operator by:
+\begin{align*}
+\frac{dz}{dx_{ijd}}
+&=
+\frac{dz}{dy_{ij}}
+\frac{1}{p}
+\left(\sum_{d'} |x_{ijd'} - \bar x_{ijd'}|^p \right)^{\frac{1}{p}-1}
+p |x_{ijd} - \bar x_{ijd}|^{p-2} (x_{ijd} - \bar x_{ijd})
+\\
+&= 
+\frac{dz}{dy_{ij}}
+\frac{|x_{ijd} - \bar x_{ijd}|^{p-2} (x_{ijd} - \bar x_{ijd})}{y_{ij}^{p-1}}.
+\end{align*}
+The formulas simplify a little for $p=1,2$ which are therefore implemented as special cases.
+
+%% ------------------------------------------------------------------
+%\subsection{Product}\label{s:product}
+%% ------------------------------------------------------------------
+%
+%\[
+% y_{ijd} = x^{(1)}_{ijd} x^{(2)}_{ijd}
+%\]
+%
+%\paragraph{Implementation details.}
+%\[
+% \frac{dz}{dx^{(1)}_{ijd}}
+%  =
+% \sum_{i''j''d''}
+%  \frac{dz}{dy_{i''j''d''}} 
+%  \frac{dy_{i''j''d''}}{dx^{(1)}_{ijd}}
+%  =
+%  \frac{dz}{dy_{ijd''}} 
+%  x^{(2)}_{ijd},
+%  \qquad
+%  \frac{dz}{dx^{(2)}_{ijd}}
+%   =
+%  \frac{dz}{dy_{ijd}} 
+%  x^{(1)}_{ijd}.
+%\]
+%
+%
+%% ------------------------------------------------------------------
+%\subsection{Split}\label{s:split}
+%% ------------------------------------------------------------------
+%
+%\[
+% y_{ijd}^{(1)} = x_{ijd}, \qquad y_{ijd}^{(2)} = x_{ijd}
+%\]
+%
+%\[
+% \frac{dz}{dx_{ijd}} =
+%\sum_{i''j''d''} 
+% \frac{dz}{dy_{i''j''d''}^{(1)}}
+%  \frac{dy_{i''j''d''}^{(1)}}{dx_{ijd}}
+% +
+%  \frac{dz}{dy_{i''j''d''}^{(2)}}
+%  \frac{dy_{i''j''d''}^{(2)}}{dx_{ijd}}
+%\]
+
+% ------------------------------------------------------------------
+\section{Receptive fields and transformations}\label{s:receptive}
+% ------------------------------------------------------------------
+
+Very often it is interesting to map a convolutional operator back to image space. Due to various downsampling and padding operations, this is not entirely trivial and analysed in this section. Considering a 1D example will be enough; hence, consider an input signal $x_i$, a filter $f_{i'}$ and an output signal $y_{i''}$, where
+\[
+   1 - P_w^- \leq i \leq W + P_w^+,  \qquad 1 \leq i' \leq W'.
+\]
+where $P_w^-,P_w^+ \geq 0$ is the amount of padding applied to the input signal to the left and right respectively. The output $y_i$ is obtained by applying a filter of size $W'$ in the following range
+\[
+   - P_w^- + S (i'' - 1) + [1, W'] = [1 - P_w^- + S(i'' - 1), - P_w^- + S(i''-1) + W']
+\]
+where $S$ is the subsampling factor. For $i'' = 1$, the leftmost sample of this window falls at the leftmost sample of the padded input signal. The rightmost sample $W'' \geq i''$ of the output signal is obtained by guaranteeing that the filter window stays within the padded input signal:
+\[
+- P_w^- + S(i''-1) + W' \leq W + P_w^+
+\qquad\Rightarrow\qquad
+i'' \leq \frac{W - W' + P_w^- + P_w^+}{S} + 1
+\]
+Since $i''$ is an integer quantity, the maximum value is:
+\begin{equation}\label{e:width}
+W'' = \lfloor
+\frac{W - W' + P_w^- + P_w^+}{S}
+\rfloor
++ 1.
+\end{equation}
+Note that $W''$ is smaller than 1 if $W' > W + P_w^- + P_w^+$; in this case the filter $f_{i'}$ is wider than the padded input signal $x_i$ and the domain of $y_{i''}$ becomes empty (this generates an error in most MatConvNet functions).
+
+Now consider a sequence of convolutional operators. One starts from an input signal $x_0$ of width $W_0$ and applies a sequence of  operators of parameters
+$
+(P_{w1}^-,  P_{w1}^+, S_1, W'_1), 
+$
+$
+(P_{w2}^-,  P_{w2}^+, S_2, W'_2), 
+$
+$\dots,
+$
+$
+(P_{wL}^-,  P_{wL},^+ S_L, W'_L)
+$
+to obtain signals $x_1,x_2,\dots,x_L$ of width $W_1,W_2,\dots,W_L$ respectively. First, note that the widths of these signals are obtained from $W_0$ and the operator parameters by a recursive application of~\eqref{e:width}. Due to the flooring operation, unfortunately it does not seem possible to simplify significantly the resulting expression. However, disregarding this operation one obtains the approximate expression
+\[
+W_l \approx
+\frac{W_0}{\prod_{p=1}^l S_q}
+-
+\sum_{p=1}^l
+\frac
+{W'_p - P_{wp}^- - P_{wp}^+  - S_{p}}
+{\prod_{q=p}^l S_q}.
+\]
+This expression is exact when $S_1 = S_2 =\dots = S_l =1$:
+\[
+W_l = W_0 - \sum_{p=1}^l (W'_p - P_{wp}^- - P_{wp}^+ - 1).
+\]
+Note in particular that without padding and filters $W_p' >1$ the widths decrease with depth. 
+
+
+Next, we are interested in computing the samples $x_{0,i_0}$ of the input signal that affect a particular sample $x_{L,i_L}$ at the end of the chain (this we call the \emph{receptive field} of the operator). Suppose that at level $l$ we have determined that samples $i_l \in [I_l^-(i_L), I_l^+(i_L)]$ affect $x_{L,i_L}$ and compute the samples at the level below. These are given by the union of filter applications:
+\[
+ \cup_{I_l^-(i_L) \leq i_l \leq I_l^+(i_L)} \left(-P_{wl}^- + S_l (i_l-1)  + [1, W_l'] \right).
+\]
+Hence we find the recurrences:
+\begin{align*}
+ I_{l-1}^-(i_L) &= - P_{wl}^- + S_l (I_l^-(i_L)-1) + 1,
+ \\
+ I_{l-1}^+(i_L) &= - P_{wl}^- + S_l (I_l^+(i_L)-1) + W_l'.
+\end{align*}
+Given the base case $I_L^-(i_L) = I_L^+(i_L) = i_L$,  one gets:
+\begin{align*}
+I_{l}^-(i_L)
+&=
+1 
++ \left(\prod_{p=l+1}^L S_p\right) (i_L - 1)
+- \sum_{p =l+1}^L  \left(\prod_{q=l+1}^{p-1} S_q\right)P_{wp}^-,
+\\
+I_{l}^-(i_L)
+&=
+1 
++ \left(\prod_{p=l+1}^L S_p\right) (i_L - 1)
++ \sum_{p = l+1}^L  \left(\prod_{q=l+1}^{p-1} S_q\right)(W_p' - 1 - P_{wp}^-).
+\end{align*}
+We can now compute several quantities of interest. First, the receptive field width on the image is:
+\[
+ \Delta 
+ = I_0^+(i_L) - I_0^-(i_L) + 1
+ = 1+ \sum_{p = 1}^L  \left(\prod_{q=1}^{p-1} S_q\right)(W_p' - 1).
+\]
+Second, the leftmost sample of the input signal $x_{0,i_0}$ affecting output sample $x_{l,i_L}$ is
+\[
+i_0(i_L)  =
+1 
++ \left(\prod_{p=1}^L S_p\right) (i_L - 1)
+- \sum_{p =1}^L  \left(\prod_{q=1}^{p-1} S_q\right)P_{wp}^-
+\]
+Note that the effect of padding at different layers accumulates, resulting in an overall padding potentially larger than the padding $P_{w1}^-$ specified by the first operator (i.e. $i_0(1) \leq - P_{w1}^-$).
+
+Finally, it is interesting to reparametrise these coordinates as if the discrete signal were continuous and if (as it is usually the case) all the convolutional operators are ``centred''. For example, the operators could be filters with an odd size $W_l'$ equal to the delta function (e.g. for $W_l'=5$ then $f_l = (0,0,1,0,0)$). Let $u_L = i_L$ be the ``continuous'' version of index $i_L$, where each discrete sample corresponds, as per MATLAB's convention, to a tile of extent $u_L \in [-1/2,1/2] + i_L$ (hence $u_L$ is the centre coordinate of a sample). As before, $x_L(u_L)$ is obtained by applying an operator to the input signal $x_0$; the centre of the support of this operator falls at coordinate:
+\[
+  u_0(u_L) = \alpha\, (u_L - 1) + \beta = i_0(u_L) + \frac{\Delta-1}{2} = \alpha\, (u_L - 1) + \beta.
+\]
+Hence
+\[
+\alpha = \prod_{p=1}^L S_p,
+\qquad
+\beta
+ = 
+1
++ 
+\sum_{p = 1}^L  \left(\prod_{q=1}^{p-1} S_q\right)
+\left(
+\frac{W_p' - 1}{2}  - P_{wp}^-
+\right).
+\]
+Note in particular that the offset is zero if $S_1 =\dots=S_L=1$ and $P_{wp}^- = (W_p'-1)/2$ as in this case the padding is just enough such that the leftmost application of each convolutional operator has the centre that falls on the first sample of the corresponding input signal.
 
 % ------------------------------------------------------------------
 \section{Network wrappers and examples}\label{s:wrappers}
@@ -637,7 +1065,6 @@ For large scale experiments, such as learning a network for ImageNet, a NVIDIA G
 \item Consider preprocessing the data to convert all images to have an height 256 pixels. This can be done with the supplied \verb!utils/preprocess-imagenet.sh! script. In this manner, training will not have to resize the images every time. Do not forget to point the training code to the pre-processed data.
 \item Consider copying the dataset in to a RAM disk (provided that you have enough memory!) for faster access. Do not forget to point the training code to this copy.
 \item Compile \vlnn with GPU support. See the homepage for instructions.
-\item Compile also the \verb!vl_imreadjpeg! function. Currently, reading JPEG images from disk is a bottleneck and this function can partially alleviate this problem (in the future it should remove the bottleneck almost entirely). See the homepage for instructions.
 \end{itemize}
 
 Once your setup is ready, you should be able to run \verb!examples/cnn_imagenet! (edit the file and change any flag as needed to enable GPU support and image pre-fetching on multiple threads).

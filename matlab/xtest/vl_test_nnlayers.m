@@ -27,7 +27,7 @@ end
 rng(1) ;
 
 if nargin < 2
-  tests = 1:9 ;
+  tests = 1:10 ;
 end
 
 for l = tests
@@ -205,7 +205,7 @@ for l = tests
           end
         end
       end
-  
+
       disp('testing vl_nnconv pad and stride combo') ;
       x = grandn(16,15,4,2,'single') ;
       for emptyw = [true false]
@@ -342,7 +342,7 @@ for l = tests
           end
         end
       end
-        
+
     case 6
       disp('testing vl_nnnormalize') ;
 
@@ -408,5 +408,86 @@ for l = tests
       dzdy = grandn(size(y),'single') ;
       dzdx = vl_nndropout(x,dzdy,'mask',mask) ;
       vl_testder(@(x) vl_nndropout(x,'mask',mask), x, dzdy, dzdx, 1e-3*range) ;
+
+    case 10
+      disp('testing vl_nnsigmoid') ;
+      x = randn(5,5,1,1,'single') ;
+      x(:) = randperm(numel(x))' - round(numel(x)/2) ;
+      x(x==0)=1 ;
+      if gpu, x = gpuArray(x) ; end
+      y = vl_nnsigmoid(x) ;
+      dzdy = grandn(size(y),'single') ;
+      dzdx = vl_nnsigmoid(x,dzdy) ;
+      vl_testder(@(x) vl_nnsigmoid(x), x, dzdy, dzdx) ;
+
+    case 11
+      disp('testing vl_nnbnorm');
+      r = 13 ; c = 17 ;
+      nd = 4 ;
+      bs = 5 ;
+
+      dtype = 'single' ;
+
+      x = grandn(r, c, nd, bs, dtype) ;
+      g = grandn(1, 1, nd, 1);
+      b = grandn(1, 1, nd, 1);
+      g = grandn(nd, 1);
+      b = grandn(nd, 1);
+
+      y = vl_nnbnorm(x,g,b) ;
+      dzdy = grandn(size(y), dtype) ;
+      [dzdx,dzdg,dzdb] = vl_nnbnorm(x,g,b,dzdy) ;
+
+      vl_testder(@(x) vl_nnbnorm(x,g,b), x, dzdy, dzdx, range * 1e-3) ;
+      vl_testder(@(g) vl_nnbnorm(x,g,b), g, dzdy, dzdg, range * 1e-3) ;
+      vl_testder(@(b) vl_nnbnorm(x,g,b), b, dzdy, dzdb, range * 1e-3) ;
+
+    case 12
+      disp('testinb vl_nnspnorm');
+
+      h = 13 ;
+      w = 17 ;
+      d = 4 ;
+      n = 5 ;
+
+      param = [3, 3, 0.1, 0.75] ;
+      x = grandn(h,w,d,n,'single') ;
+      y = vl_nnspnorm(x, param) ;
+
+      dzdy = grand(h, w, d, n) ;
+      dzdx = vl_nnspnorm(x, param, dzdy) ;
+      vl_testder(@(x) vl_nnspnorm(x,param), x, dzdy, dzdx, range * 1e-3) ;
+
+    case 13
+      disp('testing vl_nnpdist');
+      h = 13 ;
+      w = 17 ;
+      d = 4 ;
+      n = 5 ;
+      for oneToOne = [true, false]
+        for noRoot = [true, false]
+          for p = [.5 1:3]
+            x = grandn(h,w,d,n,'single') ;
+            if oneToOne
+              x0 = grandn(h,w,d,n,'single') ;
+            else
+              x0 = grandn(1,1,d,n) ;
+            end
+            y = vl_nnpdist(x, x0, p, 'noRoot',noRoot) ;
+
+            % make sure they are not too close in anyd dimension as
+            % this may be a problem for the finite difference
+            % dereivatives as one could approach0 which is not
+            % differentiable for some p-norms
+
+            s = abs(bsxfun(@minus, x, x0)) < 5*range*1e-3 ;
+            x(s) = x(s) + 5*range ;
+
+            dzdy = grand(h, w, 1, n) ;
+            dzdx = vl_nnpdist(x,x0,p,dzdy,'noRoot',noRoot) ;
+            vl_testder(@(x) vl_nnpdist(x,x0,p,'noRoot',noRoot), x, dzdy, dzdx, range * 1e-4) ;
+          end
+        end
+      end
   end
 end
