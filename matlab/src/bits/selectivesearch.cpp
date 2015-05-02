@@ -196,12 +196,12 @@ static void gaussianBlur(float *output, float const *data, int height, int width
   }
 }
 
-static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes, std::vector<bool>& neighbours, std::vector<int>& rects, float *data, int height, int width)
+static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes,
+                                std::vector<bool>& neighbours, std::vector<int>& rects,
+                                float *data, int height, int width, float threshConst, int minSize)
 {
 
   clock_t initSegSetup = clock();
-  int const minSize = 200;
-  float const threshConst = 200.f;
 
   // Initialise graph
   int const edgesPerVertex = 4;
@@ -700,7 +700,8 @@ static void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSi
   }
 }
 
-void vl::selectivesearch(std::vector<int>& out, float const *data, int height, int width, std::vector<int> similarityMeasures)
+void vl::selectivesearch(std::vector<int>& out, float const *data, int height, int width,
+                         std::vector<int> similarityMeasures, float threshConst, int minSize)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
@@ -712,7 +713,8 @@ void vl::selectivesearch(std::vector<int>& out, float const *data, int height, i
   gaussianBlur(&blurred[0], data, height, width);
 
   time_t initSeg = clock();
-  initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0], height, width);
+  initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0],
+                      height, width, threshConst, minSize);
   if(timing) printf("initSeg %f\n", (clock() - initSeg)/(double)CLOCKS_PER_SEC);
   //savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
   //saveCSV(segmented, width, height, "/tmp/seg.csv");

@@ -5,7 +5,8 @@
 
 namespace vl {
 
-  void selectivesearch(std::vector<int>& out, float const *data, int height, int width, std::vector<int> similarityMeasures);
+  void selectivesearch(std::vector<int>& out, float const *data, int height, int width,
+                       std::vector<int> similarityMeasures, float threshConst, int minSize);
 
   enum Similarity
   {

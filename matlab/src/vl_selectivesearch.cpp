@@ -30,6 +30,17 @@ void mexFunction(int nout, mxArray *out[],
     mexErrMsgTxt("Input must be HxWx3");
   }
 
+  float threshConst = 200.0f;
+  if (nin >= 2) {
+    threshConst = (float) mxGetPr(in[1])[0];
+  }
+
+  int minSize = 200;
+  if (nin >= 3) {
+    minSize = (int) mxGetPr(in[2])[0];
+  }
+  mexPrintf("initSeg params %f %d\n", threshConst, minSize);
+
   mwSize const *dims = mxGetDimensions(in[0]);
   mwSize height = dims[0];
   mwSize width = dims[1];
