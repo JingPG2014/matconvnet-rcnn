@@ -5,9 +5,12 @@
 #include <math.h>
 #include <limits>
 #include <vector>
+#include <time.h>
 
 static int const nchannels = 3;
+static int const timing = false; // print times
 
+// temporary stuff for debugging
 template <typename T>
 void savePPM(T& data, int width, int height, const char * fn, float minv=0.f, float maxv=1.f)
 {
@@ -166,7 +169,6 @@ void angleGrad(std::vector<float>& out, float const *smoothed, int height, int w
 
 static void gaussianBlur(float *output, float const *data, int height, int width)
 {
-
   // we only compute centre and positive side of gaussian, since it is symmetric
   // so effectively a 9x9 filter
   int const filterVectorSize = 5;
@@ -196,6 +198,8 @@ static void gaussianBlur(float *output, float const *data, int height, int width
 
 static void initialSegmentation(int *output, int& nRegions, std::vector<int>& sizes, std::vector<bool>& neighbours, std::vector<int>& rects, float *data, int height, int width)
 {
+
+  clock_t initSegSetup = clock();
   int const minSize = 200;
   float const threshConst = 200.f;
 
@@ -224,6 +228,9 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
       }
     }
   }
+  if(timing) printf("initSegSetup %f\n", (clock() - initSegSetup)/(double)CLOCKS_PER_SEC);
+
+  clock_t initSegSort = clock();
 
   // Sort by edge weight
   std::vector<int> edgeIndices(edgeWeights.size());
@@ -232,6 +239,10 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
   }
 
   std::sort(edgeIndices.begin(), edgeIndices.end(), SortIndices(edgeWeights));
+
+  if(timing) printf("initSegSort %f\n", (clock() - initSegSort)/(double)CLOCKS_PER_SEC);
+
+  clock_t initSegMain = clock();
 
   std::vector<float> thresh(width*height);
   for (int i = 0; i < thresh.size(); ++i) {
@@ -268,6 +279,10 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
       compressPath(vertexB, connectionMap);
     }
   }
+
+  if(timing) printf("initSegMainLoop %f\n", (clock() - initSegMain)/(double)CLOCKS_PER_SEC);
+
+  clock_t initSegPost = clock();
 
   // Remove regions smaller than minSize
   for (int i = 0; i < edgeIndices.size(); i++) {
@@ -336,6 +351,8 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
   for (int i = 0; i < nVerts; ++i) {
     output[i] = reindexed[i];
   }
+
+  if(timing) printf("initSegPost %f\n", (clock() - initSegPost)/(double)CLOCKS_PER_SEC);
 
   //saveCSV(neighbours, nRegions, nRegions, "/tmp/neighbours.csv");
 
@@ -495,40 +512,60 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
   //savePPM(gradIm, width, height, "/tmp/out.ppm", -0.43, 0.43);
 }
 
-float similarity(int ri, int rj, int nRegions, int imSize, std::vector<float>& histColour, std::vector<float>& histTexture,
-                 std::vector<int>& regionSizes, std::vector<int>& rects)
+static float similarity(int ri, int rj, int nRegions, int imSize, std::vector<float>& histColour, std::vector<float>& histTexture,
+                 std::vector<int>& regionSizes, std::vector<int>& rects, int similarityFlags)
 {
+  float sim = 0.0f;
+  int nSimMeasures = 0;
+
   // Colour - histogram intersection
-  float colour = 0.0f;
-  int hsize = histColour.size()/nRegions;
-  for (int i = 0; i < hsize; ++i) {
-    colour += (std::min)(histColour[ri * hsize + i], histColour[rj * hsize + i]);
+  if (similarityFlags & vl::SIM_COLOUR) {
+    float colour = 0.0f;
+    int hsize = histColour.size()/nRegions;
+    for (int i = 0; i < hsize; ++i) {
+      colour += (std::min)(histColour[ri * hsize + i], histColour[rj * hsize + i]);
+    }
+    sim += colour;
+    nSimMeasures++;
   }
 
   // Texture
-  float texture = 0.0f;
-  int tsize = histTexture.size()/nRegions;
-  for (int i = 0; i < tsize; ++i) {
-    texture += (std::min)(histTexture[ri * tsize + i], histTexture[rj * tsize + i]);
+  if (similarityFlags & vl::SIM_TEXTURE) {
+    float texture = 0.0f;
+    int tsize = histTexture.size()/nRegions;
+    for (int i = 0; i < tsize; ++i) {
+      texture += (std::min)(histTexture[ri * tsize + i], histTexture[rj * tsize + i]);
+    }
+    sim += texture;
+    nSimMeasures++;
   }
 
   // Size
-  float size = (imSize - regionSizes[ri] - regionSizes[rj]) / (float) imSize;
+  if (similarityFlags & vl::SIM_SIZE) {
+    float size = (imSize - regionSizes[ri] - regionSizes[rj]) / (float) imSize;
+    sim += size;
+    nSimMeasures++;
+  }
 
   // Fill
-  int h = (std::max)(rects[ri*4+2], rects[rj*4+2]) - (std::min)(rects[ri*4], rects[rj*4]) + 1;
-  int w = (std::max)(rects[ri*4+3], rects[rj*4+3]) - (std::min)(rects[ri*4+1], rects[rj*4+1]) + 1;
-  float fill = 1.f - (h*w - regionSizes[ri] - regionSizes[rj])/((float) imSize);
+  if (similarityFlags & vl::SIM_FILL) {
+    int h = (std::max)(rects[ri*4+2], rects[rj*4+2]) - (std::min)(rects[ri*4], rects[rj*4]) + 1;
+    int w = (std::max)(rects[ri*4+3], rects[rj*4+3]) - (std::min)(rects[ri*4+1], rects[rj*4+1]) + 1;
+    float fill = 1.f - (h*w - regionSizes[ri] - regionSizes[rj])/((float) imSize);
+    sim += fill;
+    nSimMeasures++;
+  }
 
-  float sim = (colour + texture + size + fill)/4.f;
+  sim /= nSimMeasures;
 
   assert(sim >= 0.f && sim <= 1.f);
 
   return sim;
 }
 
-void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std::vector<bool>& neighbours, std::vector<float>& histColour,
-                  std::vector<float>& histTexture, std::vector<int>& regionSizes, std::vector<int>& rects)
+static void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std::vector<bool>& neighbours,
+                         std::vector<float> histColour, std::vector<float> histTexture,
+                         std::vector<int> regionSizes, std::vector<int> rects, int similarityFlags)
 {
   // The indices of neighbouring regions ri and rj are stored in
   // regioni and regionj with the similarity associated with the edge
@@ -542,7 +579,8 @@ void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std
   for (int r = 0; r < nRegions; ++r) {
     for (int c = 0; c < r; ++c) {
       if(neighbours[c * nRegions + r]) {
-          similarities.push_back(similarity(r, c, nRegions, imSize, histColour, histTexture, regionSizes, rects));
+          similarities.push_back(similarity(r, c, nRegions, imSize, histColour,
+                                            histTexture, regionSizes, rects, similarityFlags));
           regioni.push_back(r);
           regionj.push_back(c);
       }
@@ -617,7 +655,7 @@ void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std
     // that have been merged and add new similarities between the merged region
     // (identified by newRegionIdx) and those neighbours (neighbourRegion).
     // Use a bool vector to avoid adding duplicate edges.
-    std::vector<bool> edgeAdded(nInitRegions * 2);
+    std::vector<bool> edgeAdded(nInitRegions * 2); // nInitRegions * 2 is upper bound
 
     // Vector grows within loop, but only loop over
     // the initial elements
@@ -642,7 +680,8 @@ void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std
         similarities[s] = -1.0f;
         //printf("Remove (%d %d)\n", regioni[s], regionj[s]);
         if (!edgeAdded[neighbourRegion]) {
-          similarities.push_back(similarity(neighbourRegion, newRegionIdx, nRegions, imSize, histColour, histTexture, regionSizes, rects));
+          similarities.push_back(similarity(neighbourRegion, newRegionIdx, nRegions, imSize, histColour,
+                                            histTexture, regionSizes, rects, similarityFlags));
           regioni.push_back(neighbourRegion);
           regionj.push_back(newRegionIdx);
           edgeAdded[neighbourRegion] = true;
@@ -651,30 +690,52 @@ void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSize, std
       }
     }
   }
+
+  // Output the new regions
+  for (int i = nInitRegions; i < rects.size()/4; ++i) {
+    mergedRegions.push_back(rects[i*4]);
+    mergedRegions.push_back(rects[i*4 + 1]);
+    mergedRegions.push_back(rects[i*4 + 2]);
+    mergedRegions.push_back(rects[i*4 + 3]);
+  }
 }
 
-void vl::selectivesearch(std::vector<int>& rects, float const *data, int height, int width)
+void vl::selectivesearch(std::vector<int>& out, float const *data, int height, int width, std::vector<int> similarityMeasures)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
   std::vector<int> segmented(height * width);
   std::vector<int> regionSizes;
   std::vector<bool> neighbours;
-  //std::vector<int> rects;
+  std::vector<int> rects;
 
   gaussianBlur(&blurred[0], data, height, width);
 
+  time_t initSeg = clock();
   initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0], height, width);
+  if(timing) printf("initSeg %f\n", (clock() - initSeg)/(double)CLOCKS_PER_SEC);
   //savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
   //saveCSV(segmented, width, height, "/tmp/seg.csv");
 
   std::vector<float> histTexture;
   std::vector<float> histColour;
 
+  time_t tex = clock();
   computeTextureHistogram(histTexture, data, &blurred[0], &segmented[0], height, width, nRegions);
-  computeColourHistogram(histColour, data, &segmented[0], height, width, nRegions);
+  if(timing) printf("tex %f\n", (clock() - tex)/(double)CLOCKS_PER_SEC);
 
-  std::vector<int> mergedRegions;
-  mergeRegions(mergedRegions, nRegions, height*width, neighbours, histColour, histTexture, regionSizes, rects);
+  time_t col = clock();
+  computeColourHistogram(histColour, data, &segmented[0], height, width, nRegions);
+  if(timing) printf("col %f\n", (clock() - col)/(double)CLOCKS_PER_SEC);
+
+  time_t merge = clock();
+  std::vector<int> mergedRegions = rects;
+  for (int i = 0; i < similarityMeasures.size(); ++i) {
+    mergeRegions(mergedRegions, nRegions, height*width, neighbours, histColour, histTexture,
+                 regionSizes, rects, similarityMeasures[i]);
+  }
+  if(timing) printf("merge %f\n", (clock() - merge)/(double)CLOCKS_PER_SEC);
+
+  out = mergedRegions;
 
 }

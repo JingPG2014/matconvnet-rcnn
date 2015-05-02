@@ -5,8 +5,15 @@
 
 namespace vl {
 
-  void selectivesearch(std::vector<int> &rects, float const *data, int height, int width);
+  void selectivesearch(std::vector<int>& out, float const *data, int height, int width, std::vector<int> similarityMeasures);
 
+  enum Similarity
+  {
+      SIM_COLOUR = 1 << 0,
+      SIM_TEXTURE = 1 << 1,
+      SIM_SIZE = 1 << 2,
+      SIM_FILL = 1 << 3
+  };
 }
 
 #endif /* defined(__vl__selectivesearch__) */

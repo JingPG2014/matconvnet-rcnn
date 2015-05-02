@@ -38,7 +38,13 @@ void mexFunction(int nout, mxArray *out[],
   float const *data = (float *) mxGetData(in[0]);
 
   std::vector<int> rects;
-  vl::selectivesearch(rects, data, height, width);
+  std::vector<int> similarityMeasures;
+
+  // TODO set from matlab
+  similarityMeasures.push_back(vl::SIM_COLOUR | vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
+  similarityMeasures.push_back(vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
+
+  vl::selectivesearch(rects, data, height, width, similarityMeasures, threshConst, minSize);
 
   int nRects = rects.size() / 4;
   out[0] = mxCreateDoubleMatrix(nRects, 4, mxREAL);
