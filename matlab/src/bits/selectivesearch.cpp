@@ -70,7 +70,7 @@ static int findHead(int vert, std::vector<int>& connectionMap)
 }
 
 
-int joinRegion(int vertexAHead, int vertexBHead, std::vector<int>& connectionMap,
+static int joinRegion(int vertexAHead, int vertexBHead, std::vector<int>& connectionMap,
                std::vector<int>& sizeMap, std::vector<int>& rankMap)
 {
   int newHead = vertexBHead;
@@ -113,7 +113,7 @@ public:
 };
 
 template <typename Out, typename In>
-void filter1DSymmetric(Out& output, In& data, std::vector<float>& filter,
+static void filter1DSymmetric(Out& output, In& data, std::vector<float>& filter,
                        int height, int width, int channel, bool filterRows)
 {
   for (int j = 0; j < width; ++j) {
@@ -133,7 +133,7 @@ void filter1DSymmetric(Out& output, In& data, std::vector<float>& filter,
 }
 
 template <typename Out, typename In>
-void filter1D(Out& output, In& data, std::vector<float>& filter,
+static void filter1D(Out& output, In& data, std::vector<float>& filter,
               int height, int width, int channel, bool filterRows)
 {
   for (int j = 0; j < width; ++j) {
@@ -150,7 +150,7 @@ void filter1D(Out& output, In& data, std::vector<float>& filter,
   }
 }
 
-void angleGrad(std::vector<float>& out, float const *smoothed, int height, int width, int channel, float phi)
+static void angleGrad(std::vector<float>& out, float const *smoothed, int height, int width, int channel, float phi)
 {
   // Angled derivative
   // First smooth with gaussian then take derivative with [-1,0,1]
@@ -207,6 +207,10 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
   int const edgesPerVertex = 4;
   int nVerts = height*width;
   int nEdges = nVerts*edgesPerVertex;
+  // Create map of edge weights, where for each vertex (=pixel) (i,j)
+  // we store the weight to the vertex (i+ioffs[d], j+joffs[d]),
+  // arranged spatially with four "planes" for d=0,1,2,3 and the
+  // weight being infinity when the "to" pixel would be out of bounds
   std::vector<float> edgeWeights(nEdges, std::numeric_limits<float>::infinity());
   int ioffs[] = {0, 1, 1, 1};
   int joffs[] = {1, 0, 1, -1};
@@ -700,8 +704,8 @@ static void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSi
   }
 }
 
-void vl::selectivesearch(std::vector<int>& out, float const *data, int height, int width,
-                         std::vector<int> similarityMeasures, float threshConst, int minSize)
+void vl::selectivesearch(std::vector<int>& rectsOut, double *initSegOut, std::vector<float>& histTexOut, std::vector<float>& histColourOut,
+                         float const *data, int height, int width, std::vector<int> similarityMeasures, float threshConst, int minSize)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
@@ -719,8 +723,8 @@ void vl::selectivesearch(std::vector<int>& out, float const *data, int height, i
   //savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
   //saveCSV(segmented, width, height, "/tmp/seg.csv");
 
-  std::vector<float> histTexture;
-  std::vector<float> histColour;
+  std::vector<float>& histTexture = histTexOut;
+  std::vector<float>& histColour = histColourOut;
 
   time_t tex = clock();
   computeTextureHistogram(histTexture, data, &blurred[0], &segmented[0], height, width, nRegions);
@@ -738,6 +742,12 @@ void vl::selectivesearch(std::vector<int>& out, float const *data, int height, i
   }
   if(timing) printf("merge %f\n", (clock() - merge)/(double)CLOCKS_PER_SEC);
 
-  out = mergedRegions;
+  rectsOut = mergedRegions;
+
+  if (initSegOut != NULL) {
+    for (int i = 0; i < segmented.size(); ++i) {
+      initSegOut[i] = (double) segmented[i];
+    }
+  }
 
 }

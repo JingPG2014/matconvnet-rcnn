@@ -39,7 +39,6 @@ void mexFunction(int nout, mxArray *out[],
   if (nin >= 3) {
     minSize = (int) mxGetPr(in[2])[0];
   }
-  mexPrintf("initSeg params %f %d\n", threshConst, minSize);
 
   mwSize const *dims = mxGetDimensions(in[0]);
   mwSize height = dims[0];
@@ -55,7 +54,16 @@ void mexFunction(int nout, mxArray *out[],
   similarityMeasures.push_back(vl::SIM_COLOUR | vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
   similarityMeasures.push_back(vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
 
-  vl::selectivesearch(rects, data, height, width, similarityMeasures, threshConst, minSize);
+  // Output initial segmentation if requested
+  double *initSegOut = NULL;
+  if (nout >= 2) {
+    out[1] = mxCreateDoubleMatrix(height, width, mxREAL);
+    initSegOut = mxGetPr(out[1]);
+  }
+
+  std::vector<float> histTexture;
+  std::vector<float> histColour;
+  vl::selectivesearch(rects, initSegOut, histTexture, histColour, data, height, width, similarityMeasures, threshConst, minSize);
 
   int nRects = rects.size() / 4;
   out[0] = mxCreateDoubleMatrix(nRects, 4, mxREAL);
@@ -66,5 +74,18 @@ void mexFunction(int nout, mxArray *out[],
     rectsOut[i + nRects * 1] = (double) rects[i * 4 + 1] + 1;
     rectsOut[i + nRects * 2] = (double) rects[i * 4 + 2] + 1;
     rectsOut[i + nRects * 3] = (double) rects[i * 4 + 3] + 1;
+  }
+
+  // Output histograms if requested
+  if (nout >= 3) {
+    out[2] = mxCreateCellMatrix(2, 1);
+
+    mxArray *tex = mxCreateDoubleMatrix(240, histTexture.size()/240, mxREAL);
+    for (int i = 0; i < histTexture.size(); ++i) mxGetPr(tex)[i] = (double) histTexture[i];
+    mxArray *col = mxCreateDoubleMatrix(75, histColour.size()/75, mxREAL);
+    for (int i = 0; i < histColour.size(); ++i) mxGetPr(col)[i] = (double) histColour[i];
+
+    mxSetCell(out[2], 0, tex);
+    mxSetCell(out[2], 1, col);
   }
 }
