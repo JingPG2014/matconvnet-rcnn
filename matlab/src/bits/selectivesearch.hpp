@@ -5,7 +5,7 @@
 
 namespace vl {
 
-  void selectivesearch(std::vector<int>& rectsOut, double *initSegOut, std::vector<float>& histTexOut, std::vector<float>& histColourOut,
+  void selectivesearch(std::vector<int>& rectsOut, std::vector<int>& initSeg, std::vector<float>& histTexOut, std::vector<float>& histColourOut,
                        float const *data, int height, int width,
                        std::vector<int> similarityMeasures, float threshConst, int minSize);
 

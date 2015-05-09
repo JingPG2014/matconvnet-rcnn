@@ -54,16 +54,32 @@ void mexFunction(int nout, mxArray *out[],
   similarityMeasures.push_back(vl::SIM_COLOUR | vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
   similarityMeasures.push_back(vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
 
-  // Output initial segmentation if requested
-  double *initSegOut = NULL;
-  if (nout >= 2) {
-    out[1] = mxCreateDoubleMatrix(height, width, mxREAL);
-    initSegOut = mxGetPr(out[1]);
-  }
-
+  std::vector<int> initSeg;
   std::vector<float> histTexture;
   std::vector<float> histColour;
-  vl::selectivesearch(rects, initSegOut, histTexture, histColour, data, height, width, similarityMeasures, threshConst, minSize);
+
+  // Allow providing initial segmentation and histograms, for debugging
+
+  if (nin >= 4) {
+    assert(mxIsClass(in[3], "int32"));
+    assert(width*height == mxGetDimensions(in[3])[0] * mxGetDimensions(in[3])[1]);
+    initSeg = std::vector<int>((int *) mxGetData(in[3]), ((int *) mxGetData(in[3])) + width*height);
+  }
+
+  if (nin >= 5) {
+    assert(mxIsClass(in[4], "single"));
+    int n = mxGetDimensions(in[4])[0] * mxGetDimensions(in[4])[1];
+    histTexture = std::vector<float>((float *) mxGetData(in[4]), ((float *) mxGetData(in[4])) + n);
+  }
+
+  if (nin >= 6) {
+    assert(mxIsClass(in[5], "single"));
+    int n = mxGetDimensions(in[5])[0] * mxGetDimensions(in[5])[1];
+    histColour = std::vector<float>((float *) mxGetData(in[5]), ((float *) mxGetData(in[5])) + n);
+  }
+
+  vl::selectivesearch(rects, initSeg, histTexture, histColour, data,
+                      height, width, similarityMeasures, threshConst, minSize);
 
   int nRects = rects.size() / 4;
   out[0] = mxCreateDoubleMatrix(nRects, 4, mxREAL);
@@ -76,7 +92,13 @@ void mexFunction(int nout, mxArray *out[],
     rectsOut[i + nRects * 3] = (double) rects[i * 4 + 3] + 1;
   }
 
-  // Output histograms if requested
+  // Output initial segmentation if requested
+  if (nout >= 2) {
+    out[1] = mxCreateDoubleMatrix(height, width, mxREAL);
+    for (int i = 0; i < height * width; ++i) mxGetPr(out[1])[i] = (double) initSeg[i];
+  }
+
+  // Output initial histograms if requested
   if (nout >= 3) {
     out[2] = mxCreateCellMatrix(2, 1);
 

@@ -6,6 +6,8 @@
 #include <limits>
 #include <vector>
 #include <time.h>
+#include <stdio.h>
+//#include "anigaussf.c"
 
 static int const nchannels = 3;
 static int const timing = false; // print times
@@ -143,6 +145,11 @@ static void filter1D(Out& output, In& data, std::vector<float>& filter,
         int offs = f - filter.size()/2;
         int ioff = filterRows ? (std::min)((int)height - 1, (std::max)(0, i + offs)) : i;
         int joff = filterRows ? j : (std::min)((int)width - 1, (std::max)(0, j + offs));
+
+        // conv2 style boundary handling
+        //int ioff = filterRows ? i + offs : i;
+        //int joff = filterRows ? j : j + offs;
+        //if (ioff >= height || ioff < 0 || joff >= width || joff < 0) continue;
         s += data[height*width*channel + height*joff + ioff] * filter[f];
       }
       output[height*width*channel + height*j + i] = s;
@@ -193,6 +200,39 @@ static void gaussianBlur(float *output, float const *data, int height, int width
   for (int c = 0; c < nchannels; ++c) {
     filter1DSymmetric(firstPass, data, filter, height, width, c, /*filterRows=*/true);
     filter1DSymmetric(output, firstPass, filter, height, width, c, /*filterRows=*/false);
+  }
+
+}
+
+static void findNeighboursAndRectangles(std::vector<bool>& neighbours, int& nRegions, std::vector<int>& rects, int height, int width, std::vector<int>& reindexed)
+{
+  // Find neighbour matrix
+  // And store [mini minj maxi maxj] for each region
+  neighbours.clear();
+  neighbours.resize(nRegions * nRegions, false);
+  rects.clear();
+  rects.resize(nRegions * 4, -1);
+  for (int j = 0; j < width; ++j) {
+    int regionAbove;
+    for (int i = 0 ; i < height; ++i) {
+      int region = reindexed[height * j + i];
+      if (i > 0) {
+        neighbours[nRegions * region + regionAbove] = true;
+        neighbours[nRegions * regionAbove + region] = true;
+      }
+      regionAbove = region;
+
+      if (j > 0) {
+        int regionLeft = reindexed[height * (j-1) + i];
+        neighbours[nRegions * region + regionLeft] = true;
+        neighbours[nRegions * regionLeft + region] = true;
+      }
+
+      rects[region * 4 + 0] = rects[region * 4 + 0] == -1 ? i : (std::min)(i, rects[region * 4 + 0]);
+      rects[region * 4 + 1] = rects[region * 4 + 1] == -1 ? j : (std::min)(j, rects[region * 4 + 1]);
+      rects[region * 4 + 2] = (std::max)(i, rects[region * 4 + 2]);
+      rects[region * 4 + 3] = (std::max)(j, rects[region * 4 + 3]);
+    }
   }
 }
 
@@ -323,34 +363,7 @@ static void initialSegmentation(int *output, int& nRegions, std::vector<int>& si
 
   nRegions = newIndex;
 
-  // Find neighbour matrix
-  // And store [mini minj maxi maxj] for each region
-  neighbours.clear();
-  neighbours.resize(nRegions * nRegions, false);
-  rects.clear();
-  rects.resize(nRegions * 4, -1);
-  for (int j = 0; j < width; ++j) {
-    int regionAbove;
-    for (int i = 0 ; i < height; ++i) {
-      int region = reindexed[height * j + i];
-      if (i > 0) {
-        neighbours[nRegions * region + regionAbove] = true;
-        neighbours[nRegions * regionAbove + region] = true;
-      }
-      regionAbove = region;
-
-      if (j > 0) {
-        int regionLeft = reindexed[height * (j-1) + i];
-        neighbours[nRegions * region + regionLeft] = true;
-        neighbours[nRegions * regionLeft + region] = true;
-      }
-
-      rects[region * 4 + 0] = rects[region * 4 + 0] == -1 ? i : (std::min)(i, rects[region * 4 + 0]);
-      rects[region * 4 + 1] = rects[region * 4 + 1] == -1 ? j : (std::min)(j, rects[region * 4 + 1]);
-      rects[region * 4 + 2] = (std::max)(i, rects[region * 4 + 2]);
-      rects[region * 4 + 3] = (std::max)(j, rects[region * 4 + 3]);
-    }
-  }
+  findNeighboursAndRectangles(neighbours, nRegions, rects, height, width, reindexed);
 
   for (int i = 0; i < nVerts; ++i) {
     output[i] = reindexed[i];
@@ -453,21 +466,25 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
         // Y dir
         filter1D(pass1, image, gaussianDeriv, height, width, c, true);
         filter1D(gradIm, pass1, gaussian, height, width, c, false);
+        //if(c==0) saveCSV(gradIm, width, height, "/tmp/Y.csv");
         break;
       case 1:
-        // 45 deg
-        angleGrad(gradIm, smoothImage, height, width, c, 45.f * (M_PI/180.f));
-        //if(c==0)saveCSV(gradIm, width, height, "/tmp/45.csv");
+        // 135 deg
+        angleGrad(gradIm, smoothImage, height, width, c, 135.f * (M_PI/180.f));
+        //anigauss(&image[c*width*height], &gradIm[c*width*height], height, width, 0.8f,  0.8f, 135.0-90.0, 1, 0);
+        //if(c==0) saveCSV(gradIm, width, height, "/tmp/XY.csv");
         break;
       case 2:
         // X dir
         filter1D(pass1, image, gaussianDeriv, height, width, c, false);
         filter1D(gradIm, pass1, gaussian, height, width, c, true);
+        //if(c==0) saveCSV(gradIm, width, height, "/tmp/X.csv");
         break;
       case 3:
-        // 135 deg
-        angleGrad(gradIm, smoothImage, height, width, c, 135.f * (M_PI/180.f));
-        //if(c==0)saveCSV(gradIm, width, height, "/tmp/135.csv");
+        // 45 deg
+        angleGrad(gradIm, smoothImage, height, width, c, 45.f * (M_PI/180.f));
+        //anigauss(&image[c*width*height], &gradIm[c*width*height], height, width, 0.8f,  0.8f,  45.0-90.0, 1, 0);
+        //if(c==0) saveCSV(gradIm, width, height, "/tmp/YX.csv");
         break;
       }
 
@@ -495,9 +512,9 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
     }
   }
 
-  //  // Print hists for region 18
-  //  for (int x=0; x < 240; ++x) {
-  //    printf("%f ", histOut[18 * descriptorSize + x]);
+  //  // Print hists for region 63
+  //  for (int x=0; x < 80; ++x) {
+  //    printf("%d ", (int) histOut[63 * descriptorSize + x]);
   //  }printf("\n");
 
   // Normalise
@@ -704,35 +721,49 @@ static void mergeRegions(std::vector<int>& mergedRegions, int nRegions, int imSi
   }
 }
 
-void vl::selectivesearch(std::vector<int>& rectsOut, double *initSegOut, std::vector<float>& histTexOut, std::vector<float>& histColourOut,
-                         float const *data, int height, int width, std::vector<int> similarityMeasures, float threshConst, int minSize)
+void vl::selectivesearch(std::vector<int>& rectsOut, std::vector<int>& initSeg,
+                         std::vector<float>& histTexOut, std::vector<float>& histColourOut,
+                         float const *data, int height, int width, std::vector<int> similarityMeasures,
+                         float threshConst, int minSize)
 {
   int nRegions;
   std::vector<float> blurred(height * width * nchannels);
-  std::vector<int> segmented(height * width);
   std::vector<int> regionSizes;
   std::vector<bool> neighbours;
   std::vector<int> rects;
 
   gaussianBlur(&blurred[0], data, height, width);
 
-  time_t initSeg = clock();
-  initialSegmentation(&segmented[0], nRegions, regionSizes, neighbours, rects, &blurred[0],
-                      height, width, threshConst, minSize);
-  if(timing) printf("initSeg %f\n", (clock() - initSeg)/(double)CLOCKS_PER_SEC);
-  //savePPM(segmented, width, height, "/tmp/seg.ppm", 0., nRegions);
-  //saveCSV(segmented, width, height, "/tmp/seg.csv");
+  if (initSeg.size() == 0) {
+    initSeg.resize(height * width);
+    time_t initSegt = clock();
+    initialSegmentation(&initSeg[0], nRegions, regionSizes, neighbours, rects, &blurred[0],
+        height, width, threshConst, minSize);
+    if(timing) printf("initSeg %f\n", (clock() - initSegt)/(double)CLOCKS_PER_SEC);
+  } else {
+    nRegions = 0;
+    for (int i = 0; i < initSeg.size(); ++i) nRegions = initSeg[i] > nRegions ? initSeg[i] : nRegions;
+    nRegions++;
+    printf("%d regions\n", nRegions);
+    regionSizes.resize(nRegions, 0);
+    for (int i = 0; i < initSeg.size(); ++i) regionSizes[initSeg[i]]++;
+    findNeighboursAndRectangles(neighbours, nRegions, rects, height, width, initSeg);
+  }
 
   std::vector<float>& histTexture = histTexOut;
   std::vector<float>& histColour = histColourOut;
 
-  time_t tex = clock();
-  computeTextureHistogram(histTexture, data, &blurred[0], &segmented[0], height, width, nRegions);
-  if(timing) printf("tex %f\n", (clock() - tex)/(double)CLOCKS_PER_SEC);
+  if (histTexture.size() == 0) {
+    time_t tex = clock();
+    computeTextureHistogram(histTexture, data, &blurred[0], &initSeg[0], height, width, nRegions);
+    if(timing) printf("tex %f\n", (clock() - tex)/(double)CLOCKS_PER_SEC);
+  }
 
-  time_t col = clock();
-  computeColourHistogram(histColour, data, &segmented[0], height, width, nRegions);
-  if(timing) printf("col %f\n", (clock() - col)/(double)CLOCKS_PER_SEC);
+  if (histColour.size() == 0) {
+    time_t col = clock();
+    computeColourHistogram(histColour, data, &initSeg[0], height, width, nRegions);
+    if(timing) printf("col %f\n", (clock() - col)/(double)CLOCKS_PER_SEC);
+  }
 
   time_t merge = clock();
   std::vector<int> mergedRegions = rects;
@@ -743,11 +774,4 @@ void vl::selectivesearch(std::vector<int>& rectsOut, double *initSegOut, std::ve
   if(timing) printf("merge %f\n", (clock() - merge)/(double)CLOCKS_PER_SEC);
 
   rectsOut = mergedRegions;
-
-  if (initSegOut != NULL) {
-    for (int i = 0; i < segmented.size(); ++i) {
-      initSegOut[i] = (double) segmented[i];
-    }
-  }
-
 }

@@ -36,7 +36,7 @@ for i=0:topIdx
 end
 [sortedSizes, si] = sort(sizes);
 
-differences = sum(sortedRefSizes ~= sortedSizes);
+differences = sum(sortedRefSizes ~= sortedSizes)
 % Should only be a small number of inconsistencies
 % (maybe due to using float images in range 0-1 rather than 0-255 
 % for initial segmentation or ambiguities in sorting)

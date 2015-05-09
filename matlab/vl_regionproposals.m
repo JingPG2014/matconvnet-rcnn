@@ -14,7 +14,6 @@ colfns = {@rgb2hsv, @myIm2Lab};
 ks = [50 100];
 
 rects = [];
-priorities = [];
 
 for c=1:length(colfns)
     fn = colfns{c};
