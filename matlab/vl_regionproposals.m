@@ -12,6 +12,9 @@ end
 colfns = {@rgb2hsv, @myIm2Lab};
 % Thresholds for initial segmentation
 ks = [50 100];
+% Similarity measures
+% c=colour, t=texture, s=size, f=fill
+simMeasures = {'ctsf', 'tsf'};
 
 rects = [];
 
@@ -20,7 +23,7 @@ for c=1:length(colfns)
     csIm = fn(im);
     for k=ks
         minSize = k;
-        r = vl_selectivesearch(csIm, k, minSize);
+        r = vl_selectivesearch(csIm, k, minSize, simMeasures);
         rects = [rects; r];
         %nRects = size(rects, 1);
     end

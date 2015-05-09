@@ -11,6 +11,7 @@ the terms of the BSD license (see the COPYING file).
 */
 
 #include <vector>
+#include <string>
 
 #include "bits/selectivesearch.hpp"
 #include "bits/mexutils.h"
@@ -31,14 +32,60 @@ void mexFunction(int nout, mxArray *out[],
   }
 
   float threshConst = 200.0f;
-  if (nin >= 2) {
+  if (nin > 1) {
     threshConst = (float) mxGetPr(in[1])[0];
   }
 
   int minSize = 200;
-  if (nin >= 3) {
+  if (nin > 2) {
     minSize = (int) mxGetPr(in[2])[0];
   }
+
+  // The set of similarity measures is specified as a cell
+  // array of strings. A different grouping of the initial regions
+  // is done for each similarity measure. A similarity measure
+  // can be composed of multiple similarity functions,
+  // with a character mnemonic for each function.
+  // Similarity functions in the same string will be averaged.
+  // Eg. {'cts','ct'} will have one similarity measure accounting
+  // for colour, texture and size and another for just colour and
+  // texture.
+  // For C++ this is converted to an std::vector of bitwise flags.
+  std::vector<int> similarityMeasures;
+  if (nin > 3) {
+    if (!mxIsClass(in[3], "cell")) {
+      mexErrMsgTxt("Similarities must be cell array of strings");
+    }
+    const size_t nElems = mxGetNumberOfElements(in[3]);
+    for (int i = 0; i < nElems; ++i) {
+      const mxArray *cell = mxGetCell(in[3], i);
+      if (!mxIsClass(cell, "char")) {
+        mexErrMsgTxt("Similarities must be cell array of strings");
+      }
+      const size_t nChars = mxGetNumberOfElements(cell);
+      const mxChar *string = (mxChar *) mxGetData(cell);
+      int sim = 0;
+      for (int j = 0; j < nChars; ++j) {
+        char c = (char) string[j];
+        switch (c) {
+        case 'c': sim |= vl::SIM_COLOUR; break;
+        case 't': sim |= vl::SIM_TEXTURE; break;
+        case 's': sim |= vl::SIM_SIZE; break;
+        case 'f': sim |= vl::SIM_FILL; break;
+        default: mexWarnMsgTxt((std::string("Unknown similarity ") + c).c_str());
+        }
+      }
+      if (sim != 0) similarityMeasures.push_back(sim);
+    }
+  } else {
+    similarityMeasures.push_back(vl::SIM_COLOUR | vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
+    similarityMeasures.push_back(vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
+  }
+
+  if (similarityMeasures.size() == 0) {
+    mexErrMsgTxt("No valid similarity measures given");
+  }
+
 
   mwSize const *dims = mxGetDimensions(in[0]);
   mwSize height = dims[0];
@@ -48,11 +95,6 @@ void mexFunction(int nout, mxArray *out[],
   float const *data = (float *) mxGetData(in[0]);
 
   std::vector<int> rects;
-  std::vector<int> similarityMeasures;
-
-  // TODO set from matlab
-  similarityMeasures.push_back(vl::SIM_COLOUR | vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
-  similarityMeasures.push_back(vl::SIM_TEXTURE | vl::SIM_SIZE | vl::SIM_FILL);
 
   std::vector<int> initSeg;
   std::vector<float> histTexture;
@@ -60,22 +102,22 @@ void mexFunction(int nout, mxArray *out[],
 
   // Allow providing initial segmentation and histograms, for debugging
 
-  if (nin >= 4) {
-    assert(mxIsClass(in[3], "int32"));
-    assert(width*height == mxGetDimensions(in[3])[0] * mxGetDimensions(in[3])[1]);
-    initSeg = std::vector<int>((int *) mxGetData(in[3]), ((int *) mxGetData(in[3])) + width*height);
+  if (nin > 4) {
+    assert(mxIsClass(in[4], "int32"));
+    assert(width*height == mxGetDimensions(in[4])[0] * mxGetDimensions(in[4])[1]);
+    initSeg = std::vector<int>((int *) mxGetData(in[4]), ((int *) mxGetData(in[4])) + width*height);
   }
 
-  if (nin >= 5) {
-    assert(mxIsClass(in[4], "single"));
-    int n = mxGetDimensions(in[4])[0] * mxGetDimensions(in[4])[1];
-    histTexture = std::vector<float>((float *) mxGetData(in[4]), ((float *) mxGetData(in[4])) + n);
-  }
-
-  if (nin >= 6) {
+  if (nin > 5) {
     assert(mxIsClass(in[5], "single"));
     int n = mxGetDimensions(in[5])[0] * mxGetDimensions(in[5])[1];
-    histColour = std::vector<float>((float *) mxGetData(in[5]), ((float *) mxGetData(in[5])) + n);
+    histTexture = std::vector<float>((float *) mxGetData(in[5]), ((float *) mxGetData(in[5])) + n);
+  }
+
+  if (nin > 6) {
+    assert(mxIsClass(in[6], "single"));
+    int n = mxGetDimensions(in[6])[0] * mxGetDimensions(in[6])[1];
+    histColour = std::vector<float>((float *) mxGetData(in[6]), ((float *) mxGetData(in[6])) + n);
   }
 
   vl::selectivesearch(rects, initSeg, histTexture, histColour, data,
