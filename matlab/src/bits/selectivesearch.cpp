@@ -473,7 +473,7 @@ static void computeTextureHistogram(std::vector<float>& histOut, float const *im
 
       for (int i = 0; i < height * width; ++i) {
         int region = (int) segmentedImage[i];
-        float value = gradIm[i];
+        float value = gradIm[c*width*height + i];
 
         // Negative component
         float nvalue = (std::max)(0.f, -value);
