@@ -71,8 +71,8 @@ net = load(cafferef) ;
 % Adapt fc8 to pascal
 assert(all(net.layers{end-1}.name == 'fc8')) ;
 
-net.layers{end-1}.weights{1} = rand([1 1 4096 21], 'single') ;
-net.layers{end-1}.weights{2} = rand([1 21], 'single') ;
+net.layers{end-1}.weights{1} = 0.01 * randn([1 1 4096 21], 'single') ;
+net.layers{end-1}.weights{2} = 0.01 * randn([1 21], 'single') ;
 net.layers{end-1}.learningRate = single([10 20]) ;
 
 net.layers{end}.type = 'softmaxloss' ;
