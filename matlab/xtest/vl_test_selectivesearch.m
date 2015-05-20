@@ -77,4 +77,11 @@ textureDesc = hists{1}(:,20)';
 % They seem similar, but quite some variation (due to the gradient computation implementations?).
 % Not sure how to compare sensibly.
 
+% This function combines multiple selective search
+% proposals using different colourspaces and initial
+% segmentation parameters
+rs = vl_regionproposals(data);
+% just a simple "checksum" to see if something changes
+assert(sum(rs(:)) == 1618662);
+
 end
