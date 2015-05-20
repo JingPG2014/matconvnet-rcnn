@@ -3,7 +3,7 @@ function cnn_rcnn_finetune
 
 VOC_DIR = '~/Code/VOCdevkit' ;
 VOC_EDITION = 'VOC2007' ;
-VOC_IMAGESET = 'train' ;
+VOC_IMAGESET = 'trainval' ;
 
 matfile = sprintf('windows_%s_%s.mat', VOC_EDITION, VOC_IMAGESET) ;
 
@@ -13,6 +13,7 @@ run(fullfile(fileparts(mfilename('fullpath')), ...
 % Load VOC dataset
 
 addpath(fullfile(VOC_DIR, 'VOCcode')) ;
+VOCopts = [] ;
 VOCinit ; % creates VOCopts
 image_ids = textread(sprintf(VOCopts.imgsetpath, VOC_IMAGESET), '%s') ;
     
@@ -20,7 +21,7 @@ try
     load(matfile) ;
 catch
     windows = cell(length(image_ids), 1) ;
-    for i = 1:length(image_ids)
+    parfor i = 1:length(image_ids)
         disp(i)
         % Load annotation data
         rec = PASreadrecord(sprintf(VOCopts.annopath, image_ids{i})) ;
@@ -78,6 +79,9 @@ net.layers{end-1}.learningRate = single([10 20]) ;
 net.layers{end}.type = 'softmaxloss' ;
 
 batch_size = 128 ;
+%expdir = '/data/jdt/exp-voc2007-trainval-v3' ;
+expdir = '/tmp/exp-voc2007' ;
+gpus = [1] ;
 
 imdb.windows = windows ;
 imdb.classes = VOCopts.classes ;
@@ -88,9 +92,22 @@ imdb.averageImage = net.normalization.averageImage ;
 % Give fake train and val sets of an appropriate size, since currently
 % our getBatch function just generates a batch on the fly from the
 % set of windows
-[net, info] = cnn_train(net, imdb, @getBatch, 'train', -1*ones(10*batch_size,1),...
-                    'val', -1*ones(10*batch_size,1), 'batchSize', batch_size, 'learningRate', 0.0001) ;
+[net, info] = cnn_train(net, imdb, @getBatch, 'train', -1*ones(40*batch_size,1),...
+                    'val', -1*ones(1*batch_size,1), 'batchSize', batch_size,...
+                    'learningRate', 0.001, 'gpus', gpus, 'expDir', expdir,...
+                    'continue', true, 'numEpochs', 900) ;
 
+% Decrease learning rate
+[net, info] = cnn_train(net, imdb, @getBatch, 'train', -1*ones(40*batch_size,1),...
+                    'val', -1*ones(1*batch_size,1), 'batchSize', batch_size,...
+                    'learningRate', 0.0001, 'gpus', gpus, 'expDir', expdir,...
+                    'continue', true, 'numEpochs', 1500) ;
+
+% Decrease more (but makes little difference)
+[net, info] = cnn_train(net, imdb, @getBatch, 'train', -1*ones(40*batch_size,1),...
+                    'val', -1*ones(1*batch_size,1), 'batchSize', batch_size,...
+                    'learningRate', 0.00001, 'gpus', gpus, 'expDir', expdir,...
+                    'continue', true, 'numEpochs', 1600) ;
 
 end
 
@@ -144,6 +161,7 @@ function [imdata, labels] = getBatch(imdb, batch)
         im = single(im) ;
         crop = rcnn_crop_and_preprocess(im, bb(1), bb(2), bb(3), bb(4),...
                           crop_padding, imdb.averageImage) ;
+        if rand > 0.5, crop = fliplr(crop);, end % mirror
         imdata(:,:,:,i) = crop ;
         labels(i) = batch_windows(i, 1) ;
     end
