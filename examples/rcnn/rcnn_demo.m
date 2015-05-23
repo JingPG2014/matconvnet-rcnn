@@ -1,7 +1,7 @@
-function info = cnn_rcnn_demo(varargin)
+function info = rcnn_demo(varargin)
 
 run(fullfile(fileparts(mfilename('fullpath')), ...
-  '..', 'matlab', 'vl_setupnn.m')) ;
+  '..', '..', 'matlab', 'vl_setupnn.m')) ;
 
 RCNN_PATH = '~/Code/rcnn/' ;
 

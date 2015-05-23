@@ -1,4 +1,4 @@
-function cnn_rcnn_finetune
+function rcnn_finetune
 % First you must run utils/import-ref-models.sh
 
 VOC_DIR = '~/Code/VOCdevkit' ;
@@ -8,7 +8,7 @@ VOC_IMAGESET = 'trainval' ;
 matfile = sprintf('windows_%s_%s.mat', VOC_EDITION, VOC_IMAGESET) ;
 
 run(fullfile(fileparts(mfilename('fullpath')), ...
-  '..', 'matlab', 'vl_setupnn.m')) ;
+  '..', '..', 'matlab', 'vl_setupnn.m')) ;
 
 % Load VOC dataset
 
@@ -65,7 +65,7 @@ windows = [cat(1, windows{:}), imids] ;
 
 % Load net
 cafferef = fullfile(fileparts(mfilename('fullpath')), ...
-  '..', 'data', 'models', 'imagenet-caffe-ref.mat') ;
+  '..', '..', 'data', 'models', 'imagenet-caffe-ref.mat') ;
 
 net = load(cafferef) ;
 
