@@ -1,4 +1,4 @@
-function info = rcnn_demo(varargin)
+function info = rcnn_detection_demo(varargin)
 
 run(fullfile(fileparts(mfilename('fullpath')), ...
   '..', '..', 'matlab', 'vl_setupnn.m')) ;
