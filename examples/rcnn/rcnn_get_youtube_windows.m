@@ -5,6 +5,16 @@ addpath('/nfs/shl5.data/jdt/youtube-objects/vo-release/code/') ;
 classes={'aeroplane' 'bicycle' 'bird' 'boat' 'bottle' 'bus' 'car' 'cat' 'chair'...
          'cow' 'diningtable' 'dog' 'horse' 'motorbike' 'person' 'pottedplant'...
          'sheep' 'sofa' 'train' 'tvmonitor'}';
+
+loaded = 1;
+try
+    load('ytwindows') ;
+catch
+    loaded = false ;
+end
+if loaded
+return;
+end
      
 params = initVideoObjectOptions(1, true) ;
 params.videos.maskfile = 'train.txt' ;
@@ -49,6 +59,8 @@ for c=1:size(classes, 1)
 end
 
 windows = cat(1, ytwindows{:}) ;
+
+save('ytwindows','windows','files');
 
 
 
