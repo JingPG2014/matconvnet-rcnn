@@ -1,6 +1,6 @@
 function [ windows, files ] = rcnn_get_youtube_windows( )
 
-addpath('/nfs/shl5.data/jdt/youtube-objects/vo-release/code/') ;
+addpath('/data/jdt/youtube-objects/vo-release/code/') ;
 
 classes={'aeroplane' 'bicycle' 'bird' 'boat' 'bottle' 'bus' 'car' 'cat' 'chair'...
          'cow' 'diningtable' 'dog' 'horse' 'motorbike' 'person' 'pottedplant'...
