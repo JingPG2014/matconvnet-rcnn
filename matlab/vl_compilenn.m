@@ -199,6 +199,8 @@ lib_src{end+1} = fullfile(root,'matlab','src','bits','impl','copy_cpu.cpp') ;
 lib_src{end+1} = fullfile(root,'matlab','src','bits','impl','pooling_cpu.cpp') ;
 lib_src{end+1} = fullfile(root,'matlab','src','bits','impl','normalize_cpu.cpp') ;
 lib_src{end+1} = fullfile(root,'matlab','src','bits','impl','tinythread.cpp') ;
+lib_src{end+1} = fullfile(root,'matlab','src','bits','selectivesearch.cpp') ;
+mex_src{end+1} = fullfile(root,'matlab','src','vl_selectivesearch.cpp') ;
 
 % GPU-specific files
 if opts.enableGpu
