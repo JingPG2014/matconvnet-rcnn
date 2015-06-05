@@ -7,9 +7,10 @@ if(~isempty(inititer))
    backward_loss_split(inititer) ; 
 end
 
-VOC_DIR = '/mnt/ramdisk/jdt/VOCdevkit' ;
+VOC_DIR = '~/ostdata/VOCdevkit' ;
 VOC_EDITION = 'VOC2007' ;
 VOC_IMAGESET = 'trainval' ;
+YT_DIR = '~/ostdata/youtube-objects' ;
 
 run(fullfile(fileparts(mfilename('fullpath')), ...
   '..', '..', 'matlab', 'vl_setupnn.m')) ;
@@ -17,7 +18,10 @@ addpath(fullfile(fileparts(mfilename('fullpath')),'..')) ;
 
 % Load windows
 [windows, image_ids, VOCopts] = rcnn_get_voc_windows(VOC_DIR, VOC_EDITION, VOC_IMAGESET) ;
-[youtube_windows, youtube_files] = rcnn_get_youtube_windows() ;
+[youtube_windows, youtube_files] = rcnn_get_youtube_windows(YT_DIR) ;
+
+voc_files = cellfun(@(x) sprintf(VOCopts.imgpath, x), image_ids, 'UniformOutput', false);
+vocims = vl_imreadjpeg(voc_files);
 
 % Load net
 cafferef = fullfile(fileparts(mfilename('fullpath')), ...
@@ -62,8 +66,8 @@ net.layers{end}.stride = [1 1];
 
 batch_size = 256 ;
 expdir = '/data/jdt/exp-domainadapt-v2' ;
-expdir = '/tmp/exp-domainadapt-v3f' ;
-gpus = [2] ;
+expdir = '~/ostdata/exp-domainadapt-v3f' ;
+gpus = [3] ;
 
 imdb.windows = windows ;
 imdb.classes = VOCopts.classes ;
@@ -73,6 +77,12 @@ imdb.averageImage = net.normalization.averageImage ;
 
 imdb.youtube_windows = youtube_windows ;
 imdb.youtube_files = youtube_files ;
+
+if exist('ytimdata.mat', 'file')
+load('ytimdata', 'ytimdata');
+imdb.youtube_preprocessed_windows = ytimdata;
+end
+imdb.voc_preloaded_ims = vocims;
 
 lrs = 2 * 0.001./((1+10*(0:160)./160).^0.75);
 
@@ -200,8 +210,15 @@ end
 
 function [imdata, labels] = domainadapt_get_batch(imdb, batch)
     tvoc = tic;
-    [vocimdata, voclabels] = rcnn_get_batch(imdb, batch(1:128)) ;
+    [vocimdata, voclabels] = rcnn_get_batch(imdb, batch(1:128), imdb.voc_preloaded_ims) ;
     vocbatch = toc(tvoc)
+    
+    ytdata_in_ram = true;
+    try
+        ytpreproc = imdb.youtube_preprocessed_windows;
+    catch
+        ytdata_in_ram = false;
+    end
     
     tyt = tic;
     ytwindows = imdb.youtube_windows ;
@@ -213,29 +230,42 @@ function [imdata, labels] = domainadapt_get_batch(imdb, batch)
     i = 1;
     for i=1:128
         while 1
-        wi = randi([1, size(ytwindows,1)]);
-        cls = ytwindows(wi, 1) ;
-        sh = ytwindows(wi, 7) ;
-        fr = ytwindows(wi, 8) ;
-        
-        fn = ytfiles{cls}{sh}(fr,:) ;
-        
-        bb = ytwindows(wi, 3:6) ;
-        if any(isnan(bb)), disp('NaN bb???'); continue; end
-        im = imread(fn) ;
-        im = single(im) ;
-        if length(size(im)) == 2
-            im = cat(3, im, im, im) ;
-        end
+          wi = randi([1, size(ytwindows,1)]);
+          cls = ytwindows(wi, 1) ;
+          sh = ytwindows(wi, 7) ;
+          fr = ytwindows(wi, 8) ;
+          
+          
+          bb = ytwindows(wi, 3:6) ;
+          if any(isnan(bb)), disp('NaN bb???'); continue; end
+          if ytdata_in_ram
+            im = ytpreproc(:,:,:,wi);
+            if all(im==0)
+              disp('reject'); continue;
+            else
+              break
+            end
+          else
+            fn = ytfiles{cls}{sh}(fr,:) ;
+            im = imread(fn) ;
+            im = single(im) ;
+            if length(size(im)) == 2
+                im = cat(3, im, im, im) ;
+            end
             x1 = bb(1); y1=bb(2); x2=bb(3); y2=bb(4);
             if min(bb) < 1 || max([x1 x2]) > size(im,2) || max([y1 y2]) > size(im,1)
                 disp('reject'); bb
             else
                 break
             end
+          end
         end
-        crop = rcnn_crop_and_preprocess(im, bb(1), bb(2), bb(3), bb(4),...
+        if ytdata_in_ram
+            crop = single(im) - single(imdb.averageImage);
+        else
+            crop = rcnn_crop_and_preprocess(im, bb(1), bb(2), bb(3), bb(4),...
             16, imdb.averageImage) ;
+        end
         if rand > 0.5, crop = fliplr(crop); end % mirror
         vidimdata(:,:,:,i) = crop ;
         i = i + 1 ;

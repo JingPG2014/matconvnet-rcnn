@@ -1,4 +1,4 @@
-function [imdata, labels] = rcnn_get_batch(imdb, batch)
+function [imdata, labels] = rcnn_get_batch(imdb, batch, preloaded)
 
 % Girschick uses
 %     batch_size: 128
@@ -45,8 +45,12 @@ function [imdata, labels] = rcnn_get_batch(imdb, batch)
     % Extract the actual windows from the image
     for i=1:size(batch_windows, 1)
         bb = batch_windows(i, 3:6) ;
-        im = imread(sprintf(imdb.imgpath, imdb.image_ids{batch_windows(i, 7)})) ;
-        im = single(im) ;
+        if exist('preloaded', 'var')
+            im = preloaded{batch_windows(i, 7)};
+        else
+            im = imread(sprintf(imdb.imgpath, imdb.image_ids{batch_windows(i, 7)})) ;
+            im = single(im) ;
+        end
         crop = rcnn_crop_and_preprocess(im, bb(1), bb(2), bb(3), bb(4),...
                           crop_padding, imdb.averageImage) ;
         if rand > 0.5, crop = fliplr(crop);, end % mirror
