@@ -4,7 +4,7 @@ An implementation of selective search[1] and R-CNN[2] for the [MatConvnet](http:
 
 Code in [examples/rcnn](https://github.com/jamt9000/matconvnet-rcnn/tree/selectivesearch/examples/rcnn)
 
-For the Selective Search implementation see [vl_regionproposals](https://github.com/jamt9000/matconvnet-rcnn/blob/selectivesearch/matlab/vl_regionproposals.m) which is a wrapper around [vl_selectivesearch.cpp](https://github.com/jamt9000/matconvnet-rcnn/blob/selectivesearch/matlab/src/vl_selectivesearch.cpp).
+For the Selective Search implementation see [vl_regionproposals](https://github.com/jamt9000/matconvnet-rcnn/blob/selectivesearch/matlab/vl_regionproposals.m) which is a wrapper around mexfile [vl_selectivesearch.cpp](https://github.com/jamt9000/matconvnet-rcnn/blob/selectivesearch/matlab/src/vl_selectivesearch.cpp) itself wrapping the pure C++ version [selectivesearch.cpp](https://github.com/jamt9000/matconvnet-rcnn/blob/selectivesearch/matlab/src/bits/selectivesearch.cpp).
 
 
 [1] Uijlings, Jasper RR, et al. "Selective search for object recognition." International journal of computer vision 104.2 (2013): 154-171.
